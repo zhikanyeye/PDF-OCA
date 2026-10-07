@@ -47,7 +47,7 @@ class PdfPageEngine(private val context: Context) {
                             listOf(CropRect(0f,0f,1f,1f))
                         } ?: listOf(CropRect(0f,0f,1f,1f))
                         for (region in regions) {
-                            val page = result.importPage(sourcePage)
+                            val page = result.importPage(sourcePage, edit.sourceIndex)
                             applyCrop(page, region)
                             if (edit.rotation != 0) {
                                 page.rotation = ((sourcePage.rotation + edit.rotation) % 360 + 360) % 360
