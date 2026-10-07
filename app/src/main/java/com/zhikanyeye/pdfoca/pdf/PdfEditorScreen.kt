@@ -125,7 +125,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
     fun selectPage(index: Int, id: Long) {
         selectedPage = index
         selectedPageId = id
-        selectedPages = selectedPages + id
+        selectedPages = setOf(id)
     }
 
     fun moveSelected(delta: Int) {
@@ -190,7 +190,22 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
             }
 
             Spacer(Modifier.height(6.dp))
-            Text("已选择 ${selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("第 " + (selectedPage + 1) + " / " + pageCount, style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.width(12.dp))
+                    Text("已选 " + selectedPages.size + " 页", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { selectedPages = setOf(selectedPageId) }) { Text("仅选当前") }
+                }
+            }
 
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -375,7 +390,7 @@ private fun SplitPreview(
         val height = width / ratio
 
         Box(Modifier.size(width, height)) {
-            Image(bitmap.asImageBitmap(), "PDF 页面预览", Modifier.fillMaxSize())
+            Image(bitmap.asImageBitmap(), "PDF 页面预览", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
 
             val regions = when (preset) {
                 SplitPreset.CUSTOM -> listOf(customRect)
@@ -390,7 +405,7 @@ private fun SplitPreview(
                             width * (region.right - region.left),
                             height * (region.bottom - region.top)
                         )
-                        .border(1.dp, Color.White)
+                        .border(1.5.dp, MaterialTheme.colorScheme.primary)
                 )
             }
 
