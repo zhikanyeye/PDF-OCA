@@ -1,5 +1,6 @@
 package com.zhikanyeye.pdfoca.pdf
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
@@ -18,46 +19,34 @@ class PdfRendererService(private val context: Context) {
 
     init { PDFBoxResourceLoader.init(context) }
 
-    suspend fun renderPage(
-        uri: Uri,
-        pageIndex: Int,
-        maxDimension: Int = 1800,
-        rotation: Int = 0
-    ): Bitmap = withContext(Dispatchers.IO) {
-        val normalizedRotation = ((rotation % 360) + 360) % 360
-        val key = "${uri}|p=$pageIndex|d=$maxDimension|r=$normalizedRotation"
-        synchronized(cache) {
-            cache.get(key)?.let { return@withContext it }
-        }
+    suspend fun renderPage(uri: Uri, pageIndex: Int, maxDimension: Int = 1800, rotation: Int = 0): Bitmap =
+        withContext(Dispatchers.IO) {
+            val normalizedRotation = ((rotation % 360) + 360) % 360
+            val key = "${uri}|p=$pageIndex|d=$maxDimension|r=$normalizedRotation"
+            synchronized(cache) { cache.get(key)?.let { return@withContext it } }
 
-        val bitmap = context.contentResolver.openInputStream(uri).use { stream ->
-            requireNotNull(stream) { "无法打开 PDF" }
-            PDDocument.load(stream).use { document ->
-                require(pageIndex in 0 until document.numberOfPages) { "页面索引无效" }
-                val page = document.getPage(pageIndex)
-                val box = page.cropBox
-                val longest = maxOf(box.width, box.height)
-                val scale = (maxDimension / longest).coerceIn(0.35f, 4f)
-                val rendered = PDFRenderer(document).renderImage(pageIndex, scale)
-                if (normalizedRotation == 0) rendered
-                else {
-                    val matrix = Matrix().apply { postRotate(normalizedRotation.toFloat()) }
-                    Bitmap.createBitmap(
-                        rendered, 0, 0, rendered.width, rendered.height, matrix, true
-                    ).also {
-                        if (it !== rendered && !rendered.isRecycled) rendered.recycle()
+            val bitmap = context.contentResolver.openInputStream(uri).use { stream ->
+                requireNotNull(stream) { "无法打开 PDF" }
+                PDDocument.load(stream).use { document ->
+                    require(pageIndex in 0 until document.numberOfPages) { "页面索引无效" }
+                    val page = document.getPage(pageIndex)
+                    val box = page.cropBox
+                    val longest = maxOf(box.width, box.height)
+                    val scale = (maxDimension / longest).coerceIn(0.35f, 4f)
+                    val rendered = PDFRenderer(document).renderImage(pageIndex, scale)
+                    if (normalizedRotation == 0) rendered
+                    else {
+                        val matrix = Matrix().apply { postRotate(normalizedRotation.toFloat()) }
+                        Bitmap.createBitmap(rendered, 0, 0, rendered.width, rendered.height, matrix, true)
+                            .also { if (it !== rendered && !rendered.isRecycled) rendered.recycle() }
                     }
                 }
             }
+            synchronized(cache) { cache.put(key, bitmap) }
+            bitmap
         }
 
-        synchronized(cache) { cache.put(key, bitmap) }
-        bitmap
-    }
-
-    fun clearCache() {
-        synchronized(cache) { cache.evictAll() }
-    }
+    fun clearCache() { synchronized(cache) { cache.evictAll() } }
 
     suspend fun pageCount(uri: Uri): Int = withContext(Dispatchers.IO) {
         context.contentResolver.openInputStream(uri).use { stream ->
@@ -67,9 +56,7 @@ class PdfRendererService(private val context: Context) {
     }
 
     private fun cacheSize(): Int {
-        val memoryClassKb = context.resources.configuration
-            .let { context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager }
-            .memoryClass * 1024
-        return (memoryClassKb / 8).coerceAtLeast(8 * 1024)
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        return (manager.memoryClass * 1024 / 8).coerceAtLeast(8 * 1024)
     }
 }
