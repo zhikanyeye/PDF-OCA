@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +35,7 @@ private data class ToolSection(
     val items: List<ToolItem>
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PdfOcaHome(
     onOpenPdf: (Uri) -> Unit,
