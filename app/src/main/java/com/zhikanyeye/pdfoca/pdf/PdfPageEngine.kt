@@ -66,7 +66,8 @@ class PdfPageEngine(private val context: Context) {
                         } ?: listOf(CropRect(0f, 0f, 1f, 1f))
 
                         for (region in regions) {
-                            resultDoc.addPage(croppedPage(sourcePage, region))
+                            val page = resultDoc.importPage(sourcePage)
+                            applyCrop(page, region)
                         }
                     }
 
@@ -77,8 +78,8 @@ class PdfPageEngine(private val context: Context) {
         return output.toByteArray()
     }
 
-    private fun croppedPage(source: PDPage, region: CropRect): PDPage {
-        val box = source.cropBox
+    private fun applyCrop(page: PDPage, region: CropRect) {
+        val box = page.cropBox
         val width = box.width
         val height = box.height
 
@@ -95,8 +96,6 @@ class PdfPageEngine(private val context: Context) {
         crop.lowerLeftX = left
         crop.lowerLeftY = bottom
 
-        return PDPage(crop).also { page ->
-            page.rotation = source.rotation
-        }
+        page.cropBox = crop
     }
 }
