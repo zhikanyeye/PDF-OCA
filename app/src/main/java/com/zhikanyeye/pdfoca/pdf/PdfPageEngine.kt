@@ -5,7 +5,7 @@ import android.net.Uri
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
-import com.tom_roush.pdfbox.pdmodel.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 
