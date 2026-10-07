@@ -16,28 +16,41 @@ class PdfPageEdits(initialCount: Int) {
 
     fun snapshot(): List<PageEdit> = pages.toList()
 
-    fun removeSelected(indices: Set<Int>) {
-        pages.removeAll { it.sourceIndex in indices }
+    fun removeSelected(ids: Set<Long>) {
+        if (ids.isEmpty()) return
+        pages.removeAll { it.id in ids }
     }
 
-    fun duplicateSelected(indices: Set<Int>) {
+    fun duplicateSelected(ids: Set<Long>) {
+        if (ids.isEmpty()) return
         val result = mutableListOf<PageEdit>()
-        pages.forEach {
-            result += it
-            if (it.sourceIndex in indices) result += it.copy(id = nextId++)
+        pages.forEach { page ->
+            result += page
+            if (page.id in ids) result += page.copy(id = nextId++)
         }
         pages.clear()
         pages.addAll(result)
     }
 
-    fun rotateBySource(index: Int, delta: Int = 90) {
-        val i = pages.indexOfFirst { it.sourceIndex == index }
-        if (i >= 0) pages[i] = pages[i].copy(rotation = (pages[i].rotation + delta + 360) % 360)
+    fun rotateById(id: Long, delta: Int = 90) {
+        val i = pages.indexOfFirst { it.id == id }
+        if (i >= 0) {
+            pages[i] = pages[i].copy(rotation = (pages[i].rotation + delta + 360) % 360)
+        }
     }
 
     fun move(from: Int, to: Int) {
         if (from !in pages.indices || to !in pages.indices || from == to) return
         val item = pages.removeAt(from)
         pages.add(to.coerceIn(0, pages.size), item)
+    }
+
+    fun moveById(id: Long, delta: Int): Int {
+        val from = pages.indexOfFirst { it.id == id }
+        if (from < 0) return -1
+        val to = (from + delta).coerceIn(0, pages.lastIndex)
+        if (from == to) return from
+        move(from, to)
+        return to
     }
 }
