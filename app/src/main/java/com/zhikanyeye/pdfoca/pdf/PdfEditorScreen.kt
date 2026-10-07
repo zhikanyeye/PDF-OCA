@@ -51,6 +51,11 @@ fun PdfEditorScreen(
     var customRect by remember { mutableStateOf(CropRect(0f, 0f, 1f, 1f)) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var contentEdits by remember { mutableStateOf<List<PdfContentEdit>>(emptyList()) }
+    var showTextDialog by remember { mutableStateOf(false) }
+    var showWatermarkDialog by remember { mutableStateOf(false) }
+    var textInput by remember { mutableStateOf("") }
+    var watermarkInput by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
     var showTools by remember { mutableStateOf(false) }
     var showPageTools by remember { mutableStateOf(false) }
@@ -74,6 +79,21 @@ fun PdfEditorScreen(
                 }
                 .onFailure { message = it.message ?: "打开 PDF 失败" }
             busy = false
+        }
+    }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("无法读取图片")
+                }.onSuccess { bytes ->
+                    edits.getOrNull(selectedPage)?.let { page ->
+                        contentEdits = contentEdits + PdfImageEdit(page.sourceIndex, bytes, .35f, .35f, .3f, .22f)
+                        message = "图片已加入当前页面，保存后写入 PDF"
+                    }
+                }.onFailure { message = it.message ?: "图片读取失败" }
+            }
         }
     }
 
@@ -106,7 +126,12 @@ fun PdfEditorScreen(
                     else selectedPages.mapNotNull { id ->
                         edits.firstOrNull { it.id == id }?.let { PageSplitRequest(it.sourceIndex, regions) }
                     }.distinctBy { it.pageIndex }
-                    val bytes = engine.split(input, requests, edits)
+                    val bytes = engine.export(
+                        input = input,
+                        edits = edits,
+                        splitRequests = requests,
+                        contentEdits = contentEdits
+                    )
                     context.contentResolver.openOutputStream(outputUri).use { out ->
                         requireNotNull(out) { "无法创建输出文件" }
                         out.write(bytes)
@@ -156,6 +181,42 @@ fun PdfEditorScreen(
             selectedPages = setOf(selectedPageId)
         }
         message = "已删除选中页面"
+    }
+
+    if (showTextDialog) {
+        AlertDialog(
+            onDismissRequest = { showTextDialog = false },
+            title = { Text("添加文字") },
+            text = { OutlinedTextField(value = textInput, onValueChange = { textInput = it }, label = { Text("文字内容") }, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = {
+                TextButton(enabled = textInput.isNotBlank(), onClick = {
+                    edits.getOrNull(selectedPage)?.let { page ->
+                        contentEdits = contentEdits + PdfTextEdit(page.sourceIndex, textInput, .12f, .18f)
+                        message = "文字已加入当前页面，保存后写入 PDF"
+                    }
+                    showTextDialog = false
+                }) { Text("添加") }
+            },
+            dismissButton = { TextButton(onClick = { showTextDialog = false }) { Text("取消") } }
+        )
+    }
+
+    if (showWatermarkDialog) {
+        AlertDialog(
+            onDismissRequest = { showWatermarkDialog = false },
+            title = { Text("添加水印") },
+            text = { OutlinedTextField(value = watermarkInput, onValueChange = { watermarkInput = it }, label = { Text("水印文字") }, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = {
+                TextButton(enabled = watermarkInput.isNotBlank(), onClick = {
+                    edits.getOrNull(selectedPage)?.let { page ->
+                        contentEdits = contentEdits + PdfWatermarkEdit(page.sourceIndex, watermarkInput)
+                        message = "水印已加入当前页面，保存后写入 PDF"
+                    }
+                    showWatermarkDialog = false
+                }) { Text("添加") }
+            },
+            dismissButton = { TextButton(onClick = { showWatermarkDialog = false }) { Text("取消") } }
+        )
     }
 
     Scaffold(
@@ -265,7 +326,18 @@ fun PdfEditorScreen(
             if (showTools) {
                 ToolPanel(Modifier.align(Alignment.BottomCenter), { showTools = false },
                     { showTools = false; savePdf.launch("PDF-OCA-edited.pdf") },
-                    { message = it },
+                    { action ->
+                        when (action) {
+                            "text" -> { textInput = ""; showTextDialog = true }
+                            "image" -> imagePicker.launch(arrayOf("image/*"))
+                            "watermark" -> { watermarkInput = ""; showWatermarkDialog = true }
+                            "highlight" -> edits.getOrNull(selectedPage)?.let { page ->
+                                contentEdits = contentEdits + PdfAnnotationEdit(page.sourceIndex, CropRect(.12f, .28f, .88f, .36f))
+                                message = "已添加高亮区域"
+                            }
+                            else -> message = action
+                        }
+                    },
                     { showTools = false; showPageTools = true })
             }
 
@@ -299,19 +371,20 @@ private fun ToolPanel(
     modifier: Modifier,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
-    onMessage: (String) -> Unit,
+    onAction: (String) -> Unit,
     onOpenSplit: () -> Unit
 ) {
     Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, tonalElevation = 8.dp, shadowElevation = 8.dp) {
         Column(Modifier.padding(16.dp)) {
             PanelHeader("编辑工具", onDismiss)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ToolAction("编辑", Icons.Default.Edit) { onMessage("文字/图片编辑正在接入") }
-                ToolAction("OCR", Icons.Default.TextFields) { onMessage("OCR 功能正在接入") }
-                ToolAction("转换", Icons.Default.Transform) { onMessage("PDF 转换功能正在接入") }
-                ToolAction("批注", Icons.Default.Draw) { onMessage("批注功能正在接入") }
-                ToolAction("水印", Icons.Default.WaterDrop) { onMessage("水印功能正在接入") }
-                ToolAction("保护", Icons.Default.Lock) { onMessage("加密/解密功能正在接入") }
+                ToolAction("编辑文字", Icons.Default.Edit) { onAction("text") }
+                ToolAction("插入图片", Icons.Default.Image) { onAction("image") }
+                ToolAction("高亮", Icons.Default.Highlight) { onAction("highlight") }
+                ToolAction("OCR", Icons.Default.TextFields) { onAction("OCR 功能正在接入") }
+                ToolAction("转换", Icons.Default.Transform) { onAction("PDF 转换功能正在接入") }
+                ToolAction("水印", Icons.Default.WaterDrop) { onAction("watermark") }
+                ToolAction("保护", Icons.Default.Lock) { onAction("加密/解密功能正在接入") }
                 ToolAction("保存", Icons.Default.Save) { onSave() }
                 ToolAction("分割", Icons.Default.ContentCut) { onOpenSplit() }
             }
