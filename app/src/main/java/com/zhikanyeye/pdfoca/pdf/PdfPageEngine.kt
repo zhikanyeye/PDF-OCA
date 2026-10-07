@@ -162,7 +162,7 @@ class PdfPageEngine(private val context: Context) {
                         )
                         stream.setTextMatrix(
                             Matrix.getRotateInstance(
-                                Math.toRadians(edit.rotation.toDouble()).toFloat(),
+                                Math.toRadians(edit.rotation.toDouble()),
                                 x,
                                 y
                             )
