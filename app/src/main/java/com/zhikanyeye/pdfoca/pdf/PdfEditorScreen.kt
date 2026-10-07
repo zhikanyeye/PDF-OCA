@@ -10,6 +10,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -84,7 +86,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
     LaunchedEffect(pdfUri, selectedPage) {
         val uri = pdfUri ?: return@LaunchedEffect
         busy = true
-        runCatching { renderer.renderPage(uri, selectedPage, 1600) }
+        runCatching { renderer.renderPage(uri, pageEdits?.snapshot()?.getOrNull(selectedPage)?.sourceIndex ?: selectedPage, 1600) }
             .onSuccess { pageBitmap = it }
             .onFailure { message = it.message ?: "页面渲染失败" }
         busy = false
@@ -119,7 +121,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
 
 
             Spacer(Modifier.height(6.dp))
-            Text("已选择 \\${selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
+            Text("已选择 ${selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = {
                     pageEdits?.removeSelected(selectedPages)
@@ -190,6 +192,34 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
 }
 
 @Composable
+private fun PageThumbnail(
+    renderer: PdfRendererService,
+    pdfUri: Uri,
+    pageIndex: Int,
+    position: Int,
+    selected: Boolean,
+    marked: Boolean,
+    onClick: () -> Unit
+) {
+    var bitmap by remember(pdfUri, pageIndex) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(pdfUri, pageIndex) {
+        runCatching { renderer.renderPage(pdfUri, pageIndex, 260) }.onSuccess { bitmap = it }
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.width(72.dp).height(92.dp).clip(MaterialTheme.shapes.small)
+                .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume(); onClick() } }
+        ) {
+            bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize()) }
+                ?: CircularProgressIndicator(Modifier.align(Alignment.Center))
+            if (marked) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(10.dp).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.primary))
+        }
+        Text("\${position + 1}", style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
 private fun SplitPreview(
     bitmap: Bitmap,
     preset: SplitPreset,
@@ -219,29 +249,38 @@ private fun SplitPreview(
             }
 
             if (preset == SplitPreset.CUSTOM) {
-                Box(
-                    Modifier.offset(width * customRect.left, height * customRect.top)
-                        .size(width * (customRect.right - customRect.left), height * (customRect.bottom - customRect.top))
-                        .border(2.dp, MaterialTheme.colorScheme.primary)
-                        .pointerInput(customRect) {
-                            detectDragGestures { change, drag ->
-                                change.consume()
-                                val dx = drag.x / width.toPx()
-                                val dy = drag.y / height.toPx()
-                                onCustomRectChange(
-                                    CropRect(
-                                        (customRect.left + dx).coerceIn(0f, customRect.right - .05f),
-                                        (customRect.top + dy).coerceIn(0f, customRect.bottom - .05f),
-                                        customRect.right,
-                                        customRect.bottom
-                                    )
-                                )
-                            }
-                        }
-                )
+                CropEditor(width = width, height = height, rect = customRect, onChange = onCustomRectChange)
             }
         }
     }
+}
+
+@Composable
+private fun CropEditor(
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
+    rect: CropRect,
+    onChange: (CropRect) -> Unit
+) {
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.offset(width * rect.left, height * rect.top).size(width * (rect.right - rect.left), height * (rect.bottom - rect.top)).border(2.dp, MaterialTheme.colorScheme.primary))
+        CropHandle(width, height, rect.left, rect.top) { dx, dy -> onChange(CropRect((rect.left+dx).coerceIn(0f,rect.right-.03f),(rect.top+dy).coerceIn(0f,rect.bottom-.03f),rect.right,rect.bottom)) }
+        CropHandle(width, height, rect.right, rect.top) { dx, dy -> onChange(CropRect(rect.left,(rect.top+dy).coerceIn(0f,rect.bottom-.03f),(rect.right+dx).coerceIn(rect.left+.03f,1f),rect.bottom)) }
+        CropHandle(width, height, rect.left, rect.bottom) { dx, dy -> onChange(CropRect((rect.left+dx).coerceIn(0f,rect.right-.03f),rect.top,rect.right,(rect.bottom+dy).coerceIn(rect.top+.03f,1f))) }
+        CropHandle(width, height, rect.right, rect.bottom) { dx, dy -> onChange(CropRect(rect.left,rect.top,(rect.right+dx).coerceIn(rect.left+.03f,1f),(rect.bottom+dy).coerceIn(rect.top+.03f,1f))) }
+    }
+}
+
+@Composable
+private fun CropHandle(
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
+    x: Float,
+    y: Float,
+    onDrag: (Float, Float) -> Unit
+) {
+    Box(Modifier.offset(width*x-9.dp,height*y-9.dp).size(18.dp).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.primary)
+        .pointerInput(x,y) { detectDragGestures { change, drag -> change.consume(); onDrag(drag.x/width.toPx(),drag.y/height.toPx()) } })
 }
 
 private fun previewRegions(preset: SplitPreset): List<CropRect> = when (preset) {
