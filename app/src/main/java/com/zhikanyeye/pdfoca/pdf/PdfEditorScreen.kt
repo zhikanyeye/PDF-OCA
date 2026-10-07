@@ -47,88 +47,60 @@ fun PdfEditorScreen(
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var showTools by remember { mutableStateOf(false) }
+    var showPageTools by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
 
     val edits = pageEdits?.snapshot().orEmpty()
 
-    LaunchedEffect(initialUri) {
-        val uri = initialUri ?: return@LaunchedEffect
-        if (uri == pdfUri) return@LaunchedEffect
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        }
+    fun loadPdf(uri: Uri) {
         pdfUri = uri
         selectedPage = 0
         selectedPageId = 0L
         selectedPages = emptySet()
-        busy = true
-        runCatching { renderer.pageCount(uri) }
-            .onSuccess {
-                pageCount = it
-                pageEdits = PdfPageEdits(it)
-                selectedPage = 0
-                selectedPageId = 0L
-                selectedPages = if (it > 0) setOf(0L) else emptySet()
-                message = "已打开 PDF，共 ${it} 页"
-            }
-            .onFailure { message = it.message ?: "打开 PDF 失败" }
-        busy = false
+        scope.launch {
+            busy = true
+            runCatching { renderer.pageCount(uri) }
+                .onSuccess {
+                    pageCount = it
+                    pageEdits = PdfPageEdits(it)
+                    selectedPages = if (it > 0) setOf(0L) else emptySet()
+                    message = "已打开 PDF，共 $it 页"
+                }
+                .onFailure { message = it.message ?: "打开 PDF 失败" }
+            busy = false
+        }
     }
 
-
-    val openPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
+    LaunchedEffect(initialUri) {
+        val uri = initialUri ?: return@LaunchedEffect
+        if (uri != pdfUri) {
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             }
-            pdfUri = uri
-            selectedPage = 0
-            selectedPageId = 0L
-            selectedPages = setOf(0L)
-            scope.launch {
-                busy = true
-                runCatching { renderer.pageCount(uri) }
-                    .onSuccess {
-                        pageCount = it
-                        pageEdits = PdfPageEdits(it)
-                        selectedPage = 0
-                        selectedPageId = 0L
-                        selectedPages = if (it > 0) setOf(0L) else emptySet()
-                        message = "已打开 PDF，共 ${it} 页"
-                    }
-                    .onFailure { message = it.message ?: "打开 PDF 失败" }
-                busy = false
-            }
+            loadPdf(uri)
         }
     }
 
-    val savePdf = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/pdf")
-    ) { outputUri ->
+    val openPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) loadPdf(uri)
+    }
+
+    val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { outputUri ->
         val input = pdfUri ?: return@rememberLauncherForActivityResult
         if (outputUri != null) {
             scope.launch {
                 busy = true
                 runCatching {
-                    val regions = if (selectedPreset == SplitPreset.CUSTOM) {
-                        listOf(customRect)
-                    } else {
-                        engine.presetRegions(selectedPreset)
-                    }
-                    val requests = if (selectedPreset == SplitPreset.NONE) {
-                        emptyList()
-                    } else {
-                        selectedPages.mapNotNull { id ->
-                            edits.firstOrNull { it.id == id }?.let {
-                                PageSplitRequest(it.sourceIndex, regions)
-                            }
-                        }.distinctBy { it.pageIndex }
-                    }
+                    val regions = if (selectedPreset == SplitPreset.CUSTOM) listOf(customRect)
+                    else engine.presetRegions(selectedPreset)
+                    val requests = if (selectedPreset == SplitPreset.NONE) emptyList()
+                    else selectedPages.mapNotNull { id ->
+                        edits.firstOrNull { it.id == id }?.let { PageSplitRequest(it.sourceIndex, regions) }
+                    }.distinctBy { it.pageIndex }
                     val bytes = engine.split(input, requests, edits)
                     context.contentResolver.openOutputStream(outputUri).use { out ->
                         requireNotNull(out) { "无法创建输出文件" }
@@ -143,8 +115,7 @@ fun PdfEditorScreen(
 
     LaunchedEffect(pdfUri, selectedPage, selectedPageId, edits) {
         val uri = pdfUri ?: return@LaunchedEffect
-        val edit = edits.getOrNull(selectedPage)
-        if (edit == null) {
+        val edit = edits.getOrNull(selectedPage) ?: run {
             pageBitmap = null
             return@LaunchedEffect
         }
@@ -162,191 +133,236 @@ fun PdfEditorScreen(
     }
 
     fun moveSelected(delta: Int) {
-        val id = selectedPageId
-        val newIndex = pageEdits?.moveById(id, delta) ?: -1
-        if (newIndex >= 0) {
-            selectedPage = newIndex
-            message = if (delta < 0) "页面已上移" else "页面已下移"
-        }
+        val newIndex = pageEdits?.moveById(selectedPageId, delta) ?: -1
+        if (newIndex >= 0) selectedPage = newIndex
     }
 
-    Column(Modifier.fillMaxSize().padding(12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (onBack != null) {
-                TextButton(onClick = onBack) { Text("返回工具") }
-            }
-            Spacer(Modifier.weight(1f))
+    fun deleteSelected() {
+        pageEdits?.removeSelected(selectedPages)
+        val remaining = pageEdits?.snapshot().orEmpty()
+        pageCount = remaining.size
+        if (remaining.isEmpty()) {
+            selectedPage = 0
+            selectedPageId = 0L
+            selectedPages = emptySet()
+        } else {
+            selectedPage = selectedPage.coerceAtMost(remaining.lastIndex)
+            selectedPageId = remaining[selectedPage].id
+            selectedPages = setOf(selectedPageId)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { openPdf.launch(arrayOf("application/pdf")) }) {
-                Text("打开 PDF")
-            }
-            Button(
-                enabled = pdfUri != null && edits.isNotEmpty() && !busy,
-                onClick = { savePdf.launch("PDF-OCA-edited.pdf") }
-            ) {
-                Text("导出")
-            }
-        }
+        message = "已删除选中页面"
+    }
 
-        Spacer(Modifier.height(8.dp))
-
-        if (pdfUri != null) {
-            Text(
-                if (pageCount > 0) "第 ${selectedPage + 1} / $pageCount 页" else "暂无页面",
-                style = MaterialTheme.typography.titleMedium
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = { onBack?.invoke() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    }
+                },
+                title = {
+                    Column {
+                        Text(pdfUri?.lastPathSegment ?: "PDF 阅读器", maxLines = 1, style = MaterialTheme.typography.titleMedium)
+                        if (pageCount > 0) {
+                            Text("第 ${selectedPage + 1} 页 · 共 $pageCount 页", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                },
+                actions = {
+                    TextButton(onClick = { showTools = !showTools }) { Text("编辑") }
+                    TextButton(onClick = { message = "AI 助手入口已预留" }) { Text("AI") }
+                    IconButton(onClick = { message = "搜索功能正在接入" }) { Icon(Icons.Default.Search, "搜索") }
+                    IconButton(onClick = { message = "书签功能正在接入" }) { Icon(Icons.Default.BookmarkBorder, "书签") }
+                    IconButton(onClick = { showMore = !showMore }) { Icon(Icons.Default.MoreVert, "更多") }
+                }
             )
-            Spacer(Modifier.height(8.dp))
+        }
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier.fillMaxWidth().weight(1f)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .24f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    pageBitmap?.let { SplitPreview(it, selectedPreset, customRect) { customRect = it } }
+                        ?: if (busy) CircularProgressIndicator() else Text("打开一个 PDF 开始阅读")
 
-            LazyRow(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(horizontal = 4.dp)
-            ) {
-                items(
-                    items = edits,
-                    key = { it.id }
-                ) { edit ->
-                    val index = edits.indexOfFirst { it.id == edit.id }
-                    PageThumbnail(
-                        renderer = renderer,
-                        pdfUri = pdfUri!!,
-                        pageIndex = edit.sourceIndex,
-                        rotation = edit.rotation,
-                        position = index,
-                        selected = index == selectedPage,
-                        marked = edit.id in selectedPages,
-                        onClick = { selectPage(index, edit.id) },
-                        onMove = { delta ->
-                            val newIndex = pageEdits?.moveById(edit.id, delta) ?: -1
-                            if (newIndex >= 0) {
-                                selectedPage = newIndex
-                                selectedPageId = edit.id
+                    if (pageCount > 0) {
+                        Surface(
+                            Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f)
+                        ) {
+                            Text("${selectedPage + 1} / $pageCount", color = MaterialTheme.colorScheme.surface,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+                        }
+                    }
+
+                    if (showMore) {
+                        Surface(Modifier.align(Alignment.TopEnd).padding(10.dp).width(230.dp),
+                            shape = MaterialTheme.shapes.large, tonalElevation = 5.dp, shadowElevation = 5.dp) {
+                            Column(Modifier.padding(vertical = 6.dp)) {
+                                MoreAction("保存副本", Icons.Default.ContentCopy) { showMore = false; savePdf.launch("PDF-OCA-edited.pdf") }
+                                MoreAction("分享", Icons.Default.Share) { showMore = false; message = "分享功能正在接入" }
+                                MoreAction("打印", Icons.Default.Print) { showMore = false; message = "打印功能正在接入" }
+                                MoreAction("打开其他 PDF", Icons.Default.FolderOpen) { showMore = false; openPdf.launch(arrayOf("application/pdf")) }
                             }
                         }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(6.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                tonalElevation = 1.dp
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("第 " + (selectedPage + 1) + " / " + pageCount, style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.width(12.dp))
-                    Text("已选 " + selectedPages.size + " 页", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { selectedPages = setOf(selectedPageId) }) { Text("仅选当前") }
-                }
-            }
-
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                SplitPreset.entries.forEach { preset ->
-                    val label = when (preset) {
-                        SplitPreset.NONE -> "预览"
-                        SplitPreset.HORIZONTAL_2 -> "左右 2"
-                        SplitPreset.VERTICAL_2 -> "上下 2"
-                        SplitPreset.GRID_2X2 -> "2×2"
-                        SplitPreset.GRID_3X3 -> "3×3"
-                        SplitPreset.CUSTOM -> "自由裁剪"
-                    }
-                    if (preset == selectedPreset) {
-                        Button(onClick = { selectedPreset = preset }) { Text(label) }
-                    } else {
-                        OutlinedButton(onClick = {
-                            selectedPreset = preset
-                            if (preset == SplitPreset.CUSTOM) customRect = CropRect(0f, 0f, 1f, 1f)
-                        }) { Text(label) }
                     }
                 }
-            }
 
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                OutlinedButton(
-                    enabled = selectedPages.isNotEmpty(),
-                    onClick = {
-                        val deletingSelected = selectedPageId in selectedPages
-                        pageEdits?.removeSelected(selectedPages)
-                        pageCount = pageEdits?.snapshot()?.size ?: 0
-                        selectedPages = emptySet()
-                        val remaining = pageEdits?.snapshot().orEmpty()
-                        if (remaining.isEmpty()) {
-                            selectedPage = 0
-                            selectedPageId = 0L
-                        } else if (deletingSelected) {
-                            selectedPage = selectedPage.coerceAtMost(remaining.lastIndex)
-                            selectedPageId = remaining[selectedPage].id
+                Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+                    LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(edits, key = { it.id }) { edit ->
+                            val index = edits.indexOfFirst { it.id == edit.id }
+                            PageThumbnail(
+                                renderer, pdfUri ?: return@items, edit.sourceIndex, edit.rotation, index,
+                                index == selectedPage, edit.id in selectedPages,
+                                { selectPage(index, edit.id) },
+                                { delta ->
+                                    val n = pageEdits?.moveById(edit.id, delta) ?: -1
+                                    if (n >= 0) { selectedPage = n; selectedPageId = edit.id }
+                                }
+                            )
                         }
-                        message = "已删除选中页面"
                     }
-                ) { Text("删除") }
-
-                OutlinedButton(
-                    enabled = selectedPages.isNotEmpty(),
-                    onClick = {
-                        pageEdits?.duplicateSelected(selectedPages)
-                        pageCount = pageEdits?.snapshot()?.size ?: 0
-                        message = "已复制选中页面"
-                    }
-                ) { Text("复制") }
-
-                OutlinedButton(
-                    enabled = selectedPages.isNotEmpty(),
-                    onClick = {
-                        selectedPages.forEach { pageEdits?.rotateById(it) }
-                        message = "已旋转 90°"
-                    }
-                ) { Text("旋转") }
-
-                OutlinedButton(enabled = selectedPage > 0, onClick = { moveSelected(-1) }) {
-                    Text("上移")
                 }
-                OutlinedButton(
-                    enabled = selectedPage < pageCount - 1,
-                    onClick = { moveSelected(1) }
-                ) { Text("下移") }
-            }
 
-            Spacer(Modifier.height(10.dp))
-            Box(
-                Modifier.fillMaxWidth().weight(1f)
-                    .clip(MaterialTheme.shapes.large)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                pageBitmap?.let { bitmap ->
-                    SplitPreview(bitmap, selectedPreset, customRect) {
-                        customRect = it
+                Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+                    Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(enabled = selectedPage > 0, onClick = { moveSelected(-1) }) { Icon(Icons.Default.ChevronLeft, "上一页") }
+                        Spacer(Modifier.weight(1f))
+                        FilledTonalButton(onClick = { showPageTools = !showPageTools }) {
+                            Icon(Icons.Default.ViewModule, null); Spacer(Modifier.width(5.dp)); Text("页面")
+                        }
+                        FilledTonalButton(onClick = { showTools = !showTools }) {
+                            Icon(Icons.Default.Edit, null); Spacer(Modifier.width(5.dp)); Text("工具")
+                        }
+                        Spacer(Modifier.weight(1f))
+                        IconButton(enabled = selectedPage < pageCount - 1, onClick = { moveSelected(1) }) { Icon(Icons.Default.ChevronRight, "下一页") }
                     }
-                } ?: CircularProgressIndicator()
+                }
             }
 
-            Spacer(Modifier.height(8.dp))
-            if (selectedPreset != SplitPreset.NONE) {
-                val count = if (selectedPreset == SplitPreset.CUSTOM) 1
-                else engine.presetRegions(selectedPreset).size
-                Text("当前页面将生成 $count 个逻辑页面。")
+            FloatingActionButton(
+                onClick = { showTools = !showTools },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 120.dp),
+                containerColor = MaterialTheme.colorScheme.primary
+            ) { Icon(Icons.Default.Edit, "编辑") }
+
+            if (showTools) {
+                ToolPanel(Modifier.align(Alignment.BottomCenter), { showTools = false },
+                    { showTools = false; savePdf.launch("PDF-OCA-edited.pdf") },
+                    { message = it },
+                    { showTools = false; showPageTools = true })
             }
-            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("选择一个 PDF 开始编辑")
+
+            if (showPageTools) {
+                PageToolsPanel(Modifier.align(Alignment.BottomCenter), { showPageTools = false },
+                    { deleteSelected(); showPageTools = false },
+                    { pageEdits?.duplicateSelected(selectedPages); pageCount = pageEdits?.snapshot()?.size ?: 0; showPageTools = false },
+                    { selectedPages.forEach { pageEdits?.rotateById(it) }; showPageTools = false },
+                    { moveSelected(-1); showPageTools = false },
+                    { moveSelected(1); showPageTools = false },
+                    { showPageTools = false; showTools = true })
+            }
+
+            if (busy) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth())
+            message?.let {
+                LaunchedEffect(it) { kotlinx.coroutines.delay(1800); message = null }
+                Surface(Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .86f)) {
+                    Text(it, color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
+    }
+}
 
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+@Composable
+private fun ToolPanel(
+    modifier: Modifier,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+    onMessage: (String) -> Unit,
+    onOpenSplit: () -> Unit
+) {
+    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, tonalElevation = 8.dp, shadowElevation = 8.dp) {
+        Column(Modifier.padding(16.dp)) {
+            PanelHeader("编辑工具", onDismiss)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ToolAction("编辑", Icons.Default.Edit) { onMessage("文字/图片编辑正在接入") }
+                ToolAction("OCR", Icons.Default.TextFields) { onMessage("OCR 功能正在接入") }
+                ToolAction("转换", Icons.Default.Transform) { onMessage("PDF 转换功能正在接入") }
+                ToolAction("批注", Icons.Default.Draw) { onMessage("批注功能正在接入") }
+                ToolAction("水印", Icons.Default.WaterDrop) { onMessage("水印功能正在接入") }
+                ToolAction("保护", Icons.Default.Lock) { onMessage("加密/解密功能正在接入") }
+                ToolAction("保存", Icons.Default.Save) { onSave() }
+                ToolAction("分割", Icons.Default.ContentCut) { onOpenSplit() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PageToolsPanel(
+    modifier: Modifier,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+    onDuplicate: () -> Unit,
+    onRotate: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onSplit: () -> Unit
+) {
+    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, tonalElevation = 8.dp, shadowElevation = 8.dp) {
+        Column(Modifier.padding(16.dp)) {
+            PanelHeader("页面管理", onDismiss)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ToolAction("删除", Icons.Default.Delete, onDelete)
+                ToolAction("复制", Icons.Default.ContentCopy, onDuplicate)
+                ToolAction("旋转", Icons.Default.RotateRight, onRotate)
+                ToolAction("上移", Icons.Default.ArrowUpward, onMoveUp)
+                ToolAction("下移", Icons.Default.ArrowDownward, onMoveDown)
+                ToolAction("分割", Icons.Default.ContentCut, onSplit)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PanelHeader(title: String, onDismiss: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.weight(1f))
+        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭") }
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun ToolAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        FilledTonalIconButton(onClick = onClick, modifier = Modifier.size(52.dp)) { Icon(icon, contentDescription = label) }
+        Spacer(Modifier.height(4.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
+private fun MoreAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Icon(icon, null); Spacer(Modifier.width(12.dp)); Text(label, modifier = Modifier.weight(1f))
     }
 }
 
