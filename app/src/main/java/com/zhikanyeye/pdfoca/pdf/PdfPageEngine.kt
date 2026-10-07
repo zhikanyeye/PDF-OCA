@@ -37,7 +37,7 @@ class PdfPageEngine(private val context: Context) {
             PDDocument.load(source).use { sourceDoc ->
                 PDDocument().use { result ->
                     val order = if (edits.isEmpty()) {
-                        (0 until sourceDoc.numberOfPages).map { PageEdit(it) }
+                        (0 until sourceDoc.numberOfPages).map { PageEdit(it.toLong(), it) }
                     } else edits
                     val requestByPage = requests.associateBy { it.pageIndex }
 
@@ -47,7 +47,7 @@ class PdfPageEngine(private val context: Context) {
                             listOf(CropRect(0f,0f,1f,1f))
                         } ?: listOf(CropRect(0f,0f,1f,1f))
                         for (region in regions) {
-                            val page = result.importPage(sourcePage, edit.sourceIndex)
+                            val page = result.importPage(sourcePage)
                             applyCrop(page, region)
                             if (edit.rotation != 0) {
                                 page.rotation = ((sourcePage.rotation + edit.rotation) % 360 + 360) % 360
