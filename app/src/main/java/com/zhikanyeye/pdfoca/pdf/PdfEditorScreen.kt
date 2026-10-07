@@ -54,7 +54,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
             scope.launch {
                 busy = true
                 runCatching { renderer.pageCount(uri) }
-                    .onSuccess { pageCount = it; message = "已打开 PDF，共 \${it} 页" }
+                    .onSuccess { pageCount = it; message = "已打开 PDF，共 ${it} 页" }
                     .onFailure { message = it.message ?: "打开 PDF 失败" }
                 busy = false
             }
@@ -83,7 +83,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
         }
     }
 
-    LaunchedEffect(pdfUri, selectedPage) {
+    LaunchedEffect(pdfUri, selectedPage, pageEdits) {
         val uri = pdfUri ?: return@LaunchedEffect
         busy = true
         runCatching { renderer.renderPage(uri, pageEdits?.snapshot()?.getOrNull(selectedPage)?.sourceIndex ?: selectedPage, 1600) }
@@ -103,63 +103,25 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
         Spacer(Modifier.height(8.dp))
 
         if (pdfUri != null) {
-            Text("第 \${selectedPage + 1} / \${pageCount} 页", style = MaterialTheme.typography.titleMedium)
+            Text("第 ${selectedPage + 1} / ${pageCount} 页", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
 
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                repeat(pageCount) { index ->
-                    FilterChip(
-                        selected = index == selectedPage,
-                        onClick = { selectedPage = index; selectedPages = selectedPages + index },
-                        label = { Text("\${index + 1}") }
-                    )
+            LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
+                itemsIndexed(pageEdits?.snapshot().orEmpty()) { index, edit ->
+                    PageThumbnail(renderer, pdfUri!!, edit.sourceIndex, index, index == selectedPage, edit.sourceIndex in selectedPages) {
+                        selectedPage = index
+                        selectedPages = selectedPages + edit.sourceIndex
+                    }
                 }
             }
-
-
             Spacer(Modifier.height(6.dp))
             Text("已选择 ${selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = {
-                    pageEdits?.removeSelected(selectedPages)
-                    pageCount = pageEdits?.snapshot()?.size ?: pageCount
-                    selectedPages = emptySet()
-                    selectedPage = 0
-                    message = "已删除选中页面"
-                }) { Text("删除") }
-                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = {
-                    pageEdits?.duplicateSelected(selectedPages)
-                    pageCount = pageEdits?.snapshot()?.size ?: pageCount
-                    message = "已复制选中页面"
-                }) { Text("复制") }
-                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = {
-                    selectedPages.forEach { pageEdits?.rotate(it) }
-                    message = "已旋转 90°"
-                }) { Text("旋转") }
-            }
-            Spacer(Modifier.height(10.dp))
-            Text("分割方式", style = MaterialTheme.typography.titleMedium)
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                listOf(
-                    "不分割" to SplitPreset.NONE,
-                    "左右 2 页" to SplitPreset.HORIZONTAL_2,
-                    "上下 2 页" to SplitPreset.VERTICAL_2,
-                    "2×2" to SplitPreset.GRID_2X2,
-                    "3×3" to SplitPreset.GRID_3X3,
-                    "自定义" to SplitPreset.CUSTOM
-                ).forEach { (label, preset) ->
-                    FilterChip(
-                        selected = selectedPreset == preset,
-                        onClick = { selectedPreset = preset },
-                        label = { Text(label) }
-                    )
-                }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = { pageEdits?.removeSelected(selectedPages); pageCount = pageEdits?.snapshot()?.size ?: 0; selectedPages = emptySet(); selectedPage = selectedPage.coerceAtMost((pageCount - 1).coerceAtLeast(0)); message = "已删除选中页面" }) { Text("删除") }
+                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = { pageEdits?.duplicateSelected(selectedPages); pageCount = pageEdits?.snapshot()?.size ?: 0; message = "已复制选中页面" }) { Text("复制") }
+                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = { selectedPages.forEach { pageEdits?.rotateBySource(it) }; message = "已旋转 90°" }) { Text("旋转") }
+                OutlinedButton(enabled = selectedPage > 0, onClick = { pageEdits?.move(selectedPage, selectedPage - 1); selectedPage--; message = "页面已上移" }) { Text("上移") }
+                OutlinedButton(enabled = selectedPage < pageCount - 1, onClick = { pageEdits?.move(selectedPage, selectedPage + 1); selectedPage++; message = "页面已下移" }) { Text("下移") }
             }
 
             Spacer(Modifier.height(10.dp))
@@ -215,7 +177,7 @@ private fun PageThumbnail(
                 ?: CircularProgressIndicator(Modifier.align(Alignment.Center))
             if (marked) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(10.dp).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.primary))
         }
-        Text("\${position + 1}", style = MaterialTheme.typography.labelSmall)
+        Text("${position + 1}", style = MaterialTheme.typography.labelSmall)
     }
 }
 
