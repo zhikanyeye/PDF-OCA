@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -65,7 +66,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
                         selectedPage = 0
                         selectedPageId = 0L
                         selectedPages = if (it > 0) setOf(0L) else emptySet()
-                        message = "已打开 PDF，共 §{it} 页"
+                        message = "已打开 PDF，共 ${it} 页"
                     }
                     .onFailure { message = it.message ?: "打开 PDF 失败" }
                 busy = false
@@ -115,7 +116,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
             return@LaunchedEffect
         }
         busy = true
-        runCatching { renderer.renderPage(uri, edit.sourceIndex, 1600) }
+        runCatching { renderer.renderPage(uri, edit.sourceIndex, 1800, edit.rotation) }
             .onSuccess { pageBitmap = it }
             .onFailure { message = it.message ?: "页面渲染失败" }
         busy = false
@@ -153,7 +154,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
 
         if (pdfUri != null) {
             Text(
-                if (pageCount > 0) "第 §{selectedPage + 1} / $pageCount 页" else "暂无页面",
+                if (pageCount > 0) "第 ${selectedPage + 1} / $pageCount 页" else "暂无页面",
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(Modifier.height(8.dp))
@@ -172,6 +173,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
                         renderer = renderer,
                         pdfUri = pdfUri!!,
                         pageIndex = edit.sourceIndex,
+                        rotation = edit.rotation,
                         position = index,
                         selected = index == selectedPage,
                         marked = edit.id in selectedPages,
@@ -188,7 +190,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
             }
 
             Spacer(Modifier.height(6.dp))
-            Text("已选择 §{selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
+            Text("已选择 ${selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
 
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -275,22 +277,23 @@ private fun PageThumbnail(
     renderer: PdfRendererService,
     pdfUri: Uri,
     pageIndex: Int,
+    rotation: Int,
     position: Int,
     selected: Boolean,
     marked: Boolean,
     onClick: () -> Unit,
     onMove: (Int) -> Unit
 ) {
-    var bitmap by remember(pdfUri, pageIndex) { mutableStateOf<Bitmap?>(null) }
+    var bitmap by remember(pdfUri, pageIndex, rotation) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(pdfUri, pageIndex) {
-        runCatching { renderer.renderPage(pdfUri, pageIndex, 260) }
+    LaunchedEffect(pdfUri, pageIndex, rotation) {
+        runCatching { renderer.renderPage(pdfUri, pageIndex, 300, rotation) }
             .onSuccess { bitmap = it }
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.width(72.dp).height(92.dp)
+            Modifier.width(92.dp).height(118.dp)
                 .clip(MaterialTheme.shapes.small)
                 .border(
                     if (selected) 2.dp else 1.dp,
@@ -316,7 +319,7 @@ private fun PageThumbnail(
                 .padding(2.dp)
         ) {
             bitmap?.let {
-                Image(it.asImageBitmap(), null, Modifier.fillMaxSize())
+                Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             } ?: CircularProgressIndicator(Modifier.align(Alignment.Center))
 
             if (marked) {
@@ -328,7 +331,7 @@ private fun PageThumbnail(
                 )
             }
         }
-        Text("§{position + 1}", style = MaterialTheme.typography.labelSmall)
+        Text("${position + 1}", style = MaterialTheme.typography.labelSmall)
     }
 }
 
