@@ -7,11 +7,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @Composable
 fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
@@ -32,13 +33,16 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
     var pdfUri by remember { mutableStateOf<Uri?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
     var selectedPage by remember { mutableIntStateOf(0) }
-    var selectedPages by remember { mutableStateOf(setOf<Int>()) }
+    var selectedPageId by remember { mutableLongStateOf(0L) }
+    var selectedPages by remember { mutableStateOf(setOf<Long>()) }
     var pageEdits by remember { mutableStateOf<PdfPageEdits?>(null) }
     var selectedPreset by remember { mutableStateOf(SplitPreset.NONE) }
     var customRect by remember { mutableStateOf(CropRect(0f, 0f, 1f, 1f)) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+
+    val edits = pageEdits?.snapshot().orEmpty()
 
     val openPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -50,52 +54,97 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
             }
             pdfUri = uri
             selectedPage = 0
-            selectedPages = setOf(0)
+            selectedPageId = 0L
+            selectedPages = setOf(0L)
             scope.launch {
                 busy = true
                 runCatching { renderer.pageCount(uri) }
-                    .onSuccess { pageCount = it; message = "已打开 PDF，共 ${it} 页" }
+                    .onSuccess {
+                        pageCount = it
+                        pageEdits = PdfPageEdits(it)
+                        selectedPage = 0
+                        selectedPageId = 0L
+                        selectedPages = if (it > 0) setOf(0L) else emptySet()
+                        message = "已打开 PDF，共 §{it} 页"
+                    }
                     .onFailure { message = it.message ?: "打开 PDF 失败" }
                 busy = false
             }
         }
     }
 
-    val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { outputUri ->
+    val savePdf = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { outputUri ->
         val input = pdfUri ?: return@rememberLauncherForActivityResult
         if (outputUri != null) {
             scope.launch {
                 busy = true
                 runCatching {
-                    val regions = if (selectedPreset == SplitPreset.CUSTOM) listOf(customRect)
-                    else engine.presetRegions(selectedPreset)
-                    val requests = if (selectedPreset == SplitPreset.NONE) emptyList()
-                    else selectedPages.map { PageSplitRequest(it, regions) }
-                    val bytes = engine.split(input, requests, pageEdits?.snapshot().orEmpty())
+                    val regions = if (selectedPreset == SplitPreset.CUSTOM) {
+                        listOf(customRect)
+                    } else {
+                        engine.presetRegions(selectedPreset)
+                    }
+                    val requests = if (selectedPreset == SplitPreset.NONE) {
+                        emptyList()
+                    } else {
+                        selectedPages.mapNotNull { id ->
+                            edits.firstOrNull { it.id == id }?.let {
+                                PageSplitRequest(it.sourceIndex, regions)
+                            }
+                        }.distinctBy { it.pageIndex }
+                    }
+                    val bytes = engine.split(input, requests, edits)
                     context.contentResolver.openOutputStream(outputUri).use { out ->
                         requireNotNull(out) { "无法创建输出文件" }
                         out.write(bytes)
                     }
                 }.onSuccess { message = "导出完成" }
-                 .onFailure { message = it.message ?: "导出失败" }
+                    .onFailure { message = it.message ?: "导出失败" }
                 busy = false
             }
         }
     }
 
-    LaunchedEffect(pdfUri, selectedPage, pageEdits) {
+    LaunchedEffect(pdfUri, selectedPage, selectedPageId, edits) {
         val uri = pdfUri ?: return@LaunchedEffect
+        val edit = edits.getOrNull(selectedPage)
+        if (edit == null) {
+            pageBitmap = null
+            return@LaunchedEffect
+        }
         busy = true
-        runCatching { renderer.renderPage(uri, pageEdits?.snapshot()?.getOrNull(selectedPage)?.sourceIndex ?: selectedPage, 1600) }
+        runCatching { renderer.renderPage(uri, edit.sourceIndex, 1600) }
             .onSuccess { pageBitmap = it }
             .onFailure { message = it.message ?: "页面渲染失败" }
         busy = false
     }
 
+    fun selectPage(index: Int, id: Long) {
+        selectedPage = index
+        selectedPageId = id
+        selectedPages = selectedPages + id
+    }
+
+    fun moveSelected(delta: Int) {
+        val id = selectedPageId
+        val newIndex = pageEdits?.moveById(id, delta) ?: -1
+        if (newIndex >= 0) {
+            selectedPage = newIndex
+            message = if (delta < 0) "页面已上移" else "页面已下移"
+        }
+    }
+
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { openPdf.launch(arrayOf("application/pdf")) }) { Text("打开 PDF") }
-            Button(enabled = pdfUri != null && !busy, onClick = { savePdf.launch("PDF-OCA-edited.pdf") }) {
+            Button(onClick = { openPdf.launch(arrayOf("application/pdf")) }) {
+                Text("打开 PDF")
+            }
+            Button(
+                enabled = pdfUri != null && edits.isNotEmpty() && !busy,
+                onClick = { savePdf.launch("PDF-OCA-edited.pdf") }
+            ) {
                 Text("导出")
             }
         }
@@ -103,25 +152,91 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
         Spacer(Modifier.height(8.dp))
 
         if (pdfUri != null) {
-            Text("第 ${selectedPage + 1} / ${pageCount} 页", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (pageCount > 0) "第 §{selectedPage + 1} / $pageCount 页" else "暂无页面",
+                style = MaterialTheme.typography.titleMedium
+            )
             Spacer(Modifier.height(8.dp))
 
-            LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
-                itemsIndexed(pageEdits?.snapshot().orEmpty()) { index, edit ->
-                    PageThumbnail(renderer, pdfUri!!, edit.sourceIndex, index, index == selectedPage, edit.sourceIndex in selectedPages) {
-                        selectedPage = index
-                        selectedPages = selectedPages + edit.sourceIndex
-                    }
+            LazyRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp)
+            ) {
+                items(
+                    items = edits,
+                    key = { it.id }
+                ) { edit ->
+                    val index = edits.indexOfFirst { it.id == edit.id }
+                    PageThumbnail(
+                        renderer = renderer,
+                        pdfUri = pdfUri!!,
+                        pageIndex = edit.sourceIndex,
+                        position = index,
+                        selected = index == selectedPage,
+                        marked = edit.id in selectedPages,
+                        onClick = { selectPage(index, edit.id) },
+                        onMove = { delta ->
+                            val newIndex = pageEdits?.moveById(edit.id, delta) ?: -1
+                            if (newIndex >= 0) {
+                                selectedPage = newIndex
+                                selectedPageId = edit.id
+                            }
+                        }
+                    )
                 }
             }
+
             Spacer(Modifier.height(6.dp))
-            Text("已选择 ${selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = { pageEdits?.removeSelected(selectedPages); pageCount = pageEdits?.snapshot()?.size ?: 0; selectedPages = emptySet(); selectedPage = selectedPage.coerceAtMost((pageCount - 1).coerceAtLeast(0)); message = "已删除选中页面" }) { Text("删除") }
-                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = { pageEdits?.duplicateSelected(selectedPages); pageCount = pageEdits?.snapshot()?.size ?: 0; message = "已复制选中页面" }) { Text("复制") }
-                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = { selectedPages.forEach { pageEdits?.rotateBySource(it) }; message = "已旋转 90°" }) { Text("旋转") }
-                OutlinedButton(enabled = selectedPage > 0, onClick = { pageEdits?.move(selectedPage, selectedPage - 1); selectedPage--; message = "页面已上移" }) { Text("上移") }
-                OutlinedButton(enabled = selectedPage < pageCount - 1, onClick = { pageEdits?.move(selectedPage, selectedPage + 1); selectedPage++; message = "页面已下移" }) { Text("下移") }
+            Text("已选择 §{selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
+
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedButton(
+                    enabled = selectedPages.isNotEmpty(),
+                    onClick = {
+                        val deletingSelected = selectedPageId in selectedPages
+                        pageEdits?.removeSelected(selectedPages)
+                        pageCount = pageEdits?.snapshot()?.size ?: 0
+                        selectedPages = emptySet()
+                        val remaining = pageEdits?.snapshot().orEmpty()
+                        if (remaining.isEmpty()) {
+                            selectedPage = 0
+                            selectedPageId = 0L
+                        } else if (deletingSelected) {
+                            selectedPage = selectedPage.coerceAtMost(remaining.lastIndex)
+                            selectedPageId = remaining[selectedPage].id
+                        }
+                        message = "已删除选中页面"
+                    }
+                ) { Text("删除") }
+
+                OutlinedButton(
+                    enabled = selectedPages.isNotEmpty(),
+                    onClick = {
+                        pageEdits?.duplicateSelected(selectedPages)
+                        pageCount = pageEdits?.snapshot()?.size ?: 0
+                        message = "已复制选中页面"
+                    }
+                ) { Text("复制") }
+
+                OutlinedButton(
+                    enabled = selectedPages.isNotEmpty(),
+                    onClick = {
+                        selectedPages.forEach { pageEdits?.rotateById(it) }
+                        message = "已旋转 90°"
+                    }
+                ) { Text("旋转") }
+
+                OutlinedButton(enabled = selectedPage > 0, onClick = { moveSelected(-1) }) {
+                    Text("上移")
+                }
+                OutlinedButton(
+                    enabled = selectedPage < pageCount - 1,
+                    onClick = { moveSelected(1) }
+                ) { Text("下移") }
             }
 
             Spacer(Modifier.height(10.dp))
@@ -132,7 +247,9 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
                 contentAlignment = Alignment.Center
             ) {
                 pageBitmap?.let { bitmap ->
-                    SplitPreview(bitmap, selectedPreset, customRect) { customRect = it }
+                    SplitPreview(bitmap, selectedPreset, customRect) {
+                        customRect = it
+                    }
                 } ?: CircularProgressIndicator()
             }
 
@@ -140,7 +257,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
             if (selectedPreset != SplitPreset.NONE) {
                 val count = if (selectedPreset == SplitPreset.CUSTOM) 1
                 else engine.presetRegions(selectedPreset).size
-                Text("当前页面将生成 \$count 个逻辑页面。")
+                Text("当前页面将生成 $count 个逻辑页面。")
             }
             message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         } else {
@@ -161,23 +278,57 @@ private fun PageThumbnail(
     position: Int,
     selected: Boolean,
     marked: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onMove: (Int) -> Unit
 ) {
     var bitmap by remember(pdfUri, pageIndex) { mutableStateOf<Bitmap?>(null) }
+
     LaunchedEffect(pdfUri, pageIndex) {
-        runCatching { renderer.renderPage(pdfUri, pageIndex, 260) }.onSuccess { bitmap = it }
+        runCatching { renderer.renderPage(pdfUri, pageIndex, 260) }
+            .onSuccess { bitmap = it }
     }
+
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.width(72.dp).height(92.dp).clip(MaterialTheme.shapes.small)
-                .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
-                .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume(); onClick() } }
+            Modifier.width(72.dp).height(92.dp)
+                .clip(MaterialTheme.shapes.small)
+                .border(
+                    if (selected) 2.dp else 1.dp,
+                    if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outline
+                )
+                .pointerInput(position) {
+                    var accumulatedX = 0f
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { accumulatedX = 0f },
+                        onDragCancel = { accumulatedX = 0f },
+                        onDragEnd = { accumulatedX = 0f }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        accumulatedX += dragAmount.x
+                        if (abs(accumulatedX) >= 42f) {
+                            val direction = if (accumulatedX > 0f) 1 else -1
+                            onMove(direction)
+                            accumulatedX = 0f
+                        }
+                    }
+                }
+                .padding(2.dp)
         ) {
-            bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize()) }
-                ?: CircularProgressIndicator(Modifier.align(Alignment.Center))
-            if (marked) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(10.dp).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.primary))
+            bitmap?.let {
+                Image(it.asImageBitmap(), null, Modifier.fillMaxSize())
+            } ?: CircularProgressIndicator(Modifier.align(Alignment.Center))
+
+            if (marked) {
+                Box(
+                    Modifier.align(Alignment.TopEnd)
+                        .padding(4.dp).size(10.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
         }
-        Text("${position + 1}", style = MaterialTheme.typography.labelSmall)
+        Text("§{position + 1}", style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -188,7 +339,10 @@ private fun SplitPreview(
     customRect: CropRect,
     onCustomRectChange: (CropRect) -> Unit
 ) {
-    BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
+    BoxWithConstraints(
+        Modifier.fillMaxSize().padding(12.dp),
+        contentAlignment = Alignment.Center
+    ) {
         val ratio = bitmap.width.toFloat() / bitmap.height
         val width = minOf(maxWidth.value, maxHeight.value * ratio).dp
         val height = width / ratio
@@ -205,13 +359,21 @@ private fun SplitPreview(
             regions.forEach { region ->
                 Box(
                     Modifier.offset(width * region.left, height * region.top)
-                        .size(width * (region.right - region.left), height * (region.bottom - region.top))
+                        .size(
+                            width * (region.right - region.left),
+                            height * (region.bottom - region.top)
+                        )
                         .border(1.dp, Color.White)
                 )
             }
 
             if (preset == SplitPreset.CUSTOM) {
-                CropEditor(width = width, height = height, rect = customRect, onChange = onCustomRectChange)
+                CropEditor(
+                    width = width,
+                    height = height,
+                    rect = customRect,
+                    onChange = onCustomRectChange
+                )
             }
         }
     }
@@ -225,11 +387,55 @@ private fun CropEditor(
     onChange: (CropRect) -> Unit
 ) {
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.offset(width * rect.left, height * rect.top).size(width * (rect.right - rect.left), height * (rect.bottom - rect.top)).border(2.dp, MaterialTheme.colorScheme.primary))
-        CropHandle(width, height, rect.left, rect.top) { dx, dy -> onChange(CropRect((rect.left+dx).coerceIn(0f,rect.right-.03f),(rect.top+dy).coerceIn(0f,rect.bottom-.03f),rect.right,rect.bottom)) }
-        CropHandle(width, height, rect.right, rect.top) { dx, dy -> onChange(CropRect(rect.left,(rect.top+dy).coerceIn(0f,rect.bottom-.03f),(rect.right+dx).coerceIn(rect.left+.03f,1f),rect.bottom)) }
-        CropHandle(width, height, rect.left, rect.bottom) { dx, dy -> onChange(CropRect((rect.left+dx).coerceIn(0f,rect.right-.03f),rect.top,rect.right,(rect.bottom+dy).coerceIn(rect.top+.03f,1f))) }
-        CropHandle(width, height, rect.right, rect.bottom) { dx, dy -> onChange(CropRect(rect.left,rect.top,(rect.right+dx).coerceIn(rect.left+.03f,1f),(rect.bottom+dy).coerceIn(rect.top+.03f,1f))) }
+        Box(
+            Modifier.offset(width * rect.left, height * rect.top)
+                .size(
+                    width * (rect.right - rect.left),
+                    height * (rect.bottom - rect.top)
+                )
+                .border(2.dp, MaterialTheme.colorScheme.primary)
+        )
+
+        CropHandle(width, height, rect.left, rect.top) { dx, dy ->
+            onChange(
+                CropRect(
+                    (rect.left + dx).coerceIn(0f, rect.right - .03f),
+                    (rect.top + dy).coerceIn(0f, rect.bottom - .03f),
+                    rect.right,
+                    rect.bottom
+                )
+            )
+        }
+        CropHandle(width, height, rect.right, rect.top) { dx, dy ->
+            onChange(
+                CropRect(
+                    rect.left,
+                    (rect.top + dy).coerceIn(0f, rect.bottom - .03f),
+                    (rect.right + dx).coerceIn(rect.left + .03f, 1f),
+                    rect.bottom
+                )
+            )
+        }
+        CropHandle(width, height, rect.left, rect.bottom) { dx, dy ->
+            onChange(
+                CropRect(
+                    (rect.left + dx).coerceIn(0f, rect.right - .03f),
+                    rect.top,
+                    rect.right,
+                    (rect.bottom + dy).coerceIn(rect.top + .03f, 1f)
+                )
+            )
+        }
+        CropHandle(width, height, rect.right, rect.bottom) { dx, dy ->
+            onChange(
+                CropRect(
+                    rect.left,
+                    rect.top,
+                    (rect.right + dx).coerceIn(rect.left + .03f, 1f),
+                    (rect.bottom + dy).coerceIn(rect.top + .03f, 1f)
+                )
+            )
+        }
     }
 }
 
@@ -241,18 +447,41 @@ private fun CropHandle(
     y: Float,
     onDrag: (Float, Float) -> Unit
 ) {
-    Box(Modifier.offset(width*x-9.dp,height*y-9.dp).size(18.dp).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.primary)
-        .pointerInput(x,y) { detectDragGestures { change, drag -> change.consume(); onDrag(drag.x/width.toPx(),drag.y/height.toPx()) } })
+    Box(
+        Modifier.offset(width * x - 9.dp, height * y - 9.dp)
+            .size(18.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.primary)
+            .pointerInput(x, y) {
+                detectDragGesturesAfterLongPress { change, drag ->
+                    change.consume()
+                    onDrag(
+                        drag.x / width.toPx(),
+                        drag.y / height.toPx()
+                    )
+                }
+            }
+    )
 }
 
 private fun previewRegions(preset: SplitPreset): List<CropRect> = when (preset) {
-    SplitPreset.HORIZONTAL_2 -> listOf(CropRect(0f,0f,.5f,1f), CropRect(.5f,0f,1f,1f))
-    SplitPreset.VERTICAL_2 -> listOf(CropRect(0f,0f,1f,.5f), CropRect(0f,.5f,1f,1f))
+    SplitPreset.HORIZONTAL_2 -> listOf(
+        CropRect(0f, 0f, .5f, 1f),
+        CropRect(.5f, 0f, 1f, 1f)
+    )
+    SplitPreset.VERTICAL_2 -> listOf(
+        CropRect(0f, 0f, 1f, .5f),
+        CropRect(0f, .5f, 1f, 1f)
+    )
     SplitPreset.GRID_2X2 -> buildList {
-        for (r in 0..1) for (c in 0..1) add(CropRect(c/2f,r/2f,(c+1)/2f,(r+1)/2f))
+        for (r in 0..1) for (c in 0..1) {
+            add(CropRect(c / 2f, r / 2f, (c + 1) / 2f, (r + 1) / 2f))
+        }
     }
     SplitPreset.GRID_3X3 -> buildList {
-        for (r in 0..2) for (c in 0..2) add(CropRect(c/3f,r/3f,(c+1)/3f,(r+1)/3f))
+        for (r in 0..2) for (c in 0..2) {
+            add(CropRect(c / 3f, r / 3f, (c + 1) / 3f, (r + 1) / 3f))
+        }
     }
     else -> emptyList()
 }
