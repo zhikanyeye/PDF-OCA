@@ -117,6 +117,27 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
                 }
             }
 
+
+            Spacer(Modifier.height(6.dp))
+            Text("已选择 \\${selectedPages.size} 页", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = {
+                    pageEdits?.removeSelected(selectedPages)
+                    pageCount = pageEdits?.snapshot()?.size ?: pageCount
+                    selectedPages = emptySet()
+                    selectedPage = 0
+                    message = "已删除选中页面"
+                }) { Text("删除") }
+                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = {
+                    pageEdits?.duplicateSelected(selectedPages)
+                    pageCount = pageEdits?.snapshot()?.size ?: pageCount
+                    message = "已复制选中页面"
+                }) { Text("复制") }
+                OutlinedButton(enabled = selectedPages.isNotEmpty(), onClick = {
+                    selectedPages.forEach { pageEdits?.rotate(it) }
+                    message = "已旋转 90°"
+                }) { Text("旋转") }
+            }
             Spacer(Modifier.height(10.dp))
             Text("分割方式", style = MaterialTheme.typography.titleMedium)
             Row(
