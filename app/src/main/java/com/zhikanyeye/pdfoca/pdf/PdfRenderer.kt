@@ -98,17 +98,6 @@ class PdfRendererService(private val context: Context) : AutoCloseable {
 
     private val bitmapCache = object : LruCache<String, Bitmap>(cacheSize()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
-
-        override fun entryRemoved(
-            evicted: Boolean,
-            key: String,
-            oldValue: Bitmap,
-            newValue: Bitmap?,
-        ) {
-            if (oldValue !== newValue && !oldValue.isRecycled) {
-                oldValue.recycle()
-            }
-        }
     }
 
     private val lock = Any()
