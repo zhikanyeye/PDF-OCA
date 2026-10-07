@@ -196,6 +196,30 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                SplitPreset.entries.forEach { preset ->
+                    val label = when (preset) {
+                        SplitPreset.NONE -> "预览"
+                        SplitPreset.HORIZONTAL_2 -> "左右 2"
+                        SplitPreset.VERTICAL_2 -> "上下 2"
+                        SplitPreset.GRID_2X2 -> "2×2"
+                        SplitPreset.GRID_3X3 -> "3×3"
+                        SplitPreset.CUSTOM -> "自由裁剪"
+                    }
+                    if (preset == selectedPreset) {
+                        Button(onClick = { selectedPreset = preset }) { Text(label) }
+                    } else {
+                        OutlinedButton(onClick = {
+                            selectedPreset = preset
+                            if (preset == SplitPreset.CUSTOM) customRect = CropRect(0f, 0f, 1f, 1f)
+                        }) { Text(label) }
+                    }
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 OutlinedButton(
                     enabled = selectedPages.isNotEmpty(),
                     onClick = {
