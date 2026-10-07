@@ -30,6 +30,8 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
     var pdfUri by remember { mutableStateOf<Uri?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
     var selectedPage by remember { mutableIntStateOf(0) }
+    var selectedPages by remember { mutableStateOf(setOf<Int>()) }
+    var pageEdits by remember { mutableStateOf<PdfPageEdits?>(null) }
     var selectedPreset by remember { mutableStateOf(SplitPreset.NONE) }
     var customRect by remember { mutableStateOf(CropRect(0f, 0f, 1f, 1f)) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -46,6 +48,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
             }
             pdfUri = uri
             selectedPage = 0
+            selectedPages = setOf(0)
             scope.launch {
                 busy = true
                 runCatching { renderer.pageCount(uri) }
@@ -65,8 +68,8 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
                     val regions = if (selectedPreset == SplitPreset.CUSTOM) listOf(customRect)
                     else engine.presetRegions(selectedPreset)
                     val requests = if (selectedPreset == SplitPreset.NONE) emptyList()
-                    else listOf(PageSplitRequest(selectedPage, regions))
-                    val bytes = engine.split(input, requests)
+                    else selectedPages.map { PageSplitRequest(it, regions) }
+                    val bytes = engine.split(input, requests, pageEdits?.snapshot().orEmpty())
                     context.contentResolver.openOutputStream(outputUri).use { out ->
                         requireNotNull(out) { "无法创建输出文件" }
                         out.write(bytes)
@@ -108,7 +111,7 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
                 repeat(pageCount) { index ->
                     FilterChip(
                         selected = index == selectedPage,
-                        onClick = { selectedPage = index },
+                        onClick = { selectedPage = index; selectedPages = selectedPages + index },
                         label = { Text("\${index + 1}") }
                     )
                 }
