@@ -20,9 +20,11 @@ import com.zhikanyeye.pdfoca.pdf.PdfRendererService
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private lateinit var renderer: PdfRendererService
+
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        val renderer = PdfRendererService(this)
+        renderer = PdfRendererService(this)
         val engine = PdfPageEngine(this)
 
         setContent {
@@ -73,5 +75,10 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onDestroy() {
+        renderer.close()
+        super.onDestroy()
     }
 }
