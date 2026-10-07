@@ -22,3 +22,6 @@ class PdfSplitPlan {
     fun requests(): List<PageSplitRequest> =
         pages.entries.sortedBy { it.key }.map { PageSplitRequest(it.key, it.value.toList()) }
 }
+
+// Split plans are intentionally independent from the UI so the same engine can
+// be driven by presets, draggable crop handles, or future AI-assisted detection.
