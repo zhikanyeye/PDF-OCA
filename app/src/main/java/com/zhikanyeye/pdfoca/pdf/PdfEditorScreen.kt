@@ -28,7 +28,12 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 @Composable
-fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
+fun PdfEditorScreen(
+    renderer: PdfRendererService,
+    engine: PdfPageEngine,
+    initialUri: Uri? = null,
+    onBack: (() -> Unit)? = null
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pdfUri by remember { mutableStateOf<Uri?>(null) }
@@ -44,6 +49,34 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
     var message by remember { mutableStateOf<String?>(null) }
 
     val edits = pageEdits?.snapshot().orEmpty()
+
+    LaunchedEffect(initialUri) {
+        val uri = initialUri ?: return@LaunchedEffect
+        if (uri == pdfUri) return@LaunchedEffect
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+        pdfUri = uri
+        selectedPage = 0
+        selectedPageId = 0L
+        selectedPages = emptySet()
+        busy = true
+        runCatching { renderer.pageCount(uri) }
+            .onSuccess {
+                pageCount = it
+                pageEdits = PdfPageEdits(it)
+                selectedPage = 0
+                selectedPageId = 0L
+                selectedPages = if (it > 0) setOf(0L) else emptySet()
+                message = "已打开 PDF，共 ${it} 页"
+            }
+            .onFailure { message = it.message ?: "打开 PDF 失败" }
+        busy = false
+    }
+
 
     val openPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -138,6 +171,12 @@ fun PdfEditorScreen(renderer: PdfRendererService, engine: PdfPageEngine) {
     }
 
     Column(Modifier.fillMaxSize().padding(12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (onBack != null) {
+                TextButton(onClick = onBack) { Text("返回工具") }
+            }
+            Spacer(Modifier.weight(1f))
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { openPdf.launch(arrayOf("application/pdf")) }) {
                 Text("打开 PDF")
