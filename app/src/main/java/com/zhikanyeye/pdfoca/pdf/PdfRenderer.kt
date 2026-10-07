@@ -47,9 +47,9 @@ class PdfRendererService(private val context: Context) : AutoCloseable {
 
         override fun seek(offset: Long, whence: Int): Long {
             val target = when (whence) {
-                SEEK_SET -> offset
-                SEEK_CUR -> position + offset
-                SEEK_END -> {
+                0 -> offset
+                1 -> position + offset
+                2 -> {
                     // Content providers do not always expose a length, so walk
                     // to EOF when MuPDF asks for an end-relative seek.
                     while (stream.read() >= 0) position++
