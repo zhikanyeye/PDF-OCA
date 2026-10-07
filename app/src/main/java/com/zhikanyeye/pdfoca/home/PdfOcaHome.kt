@@ -10,6 +10,9 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,10 +35,13 @@ private data class ToolSection(
 
 @Composable
 fun PdfOcaHome(
-    onOpenPdf: () -> Unit,
+    onOpenPdf: (Uri) -> Unit,
     onMessage: (String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(2) }
+    val openPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) onOpenPdf(uri)
+    }
 
     val sections = remember {
         listOf(
@@ -152,7 +158,7 @@ fun PdfOcaHome(
                 }
 
                 FloatingActionButton(
-                    onClick = onOpenPdf,
+                    onClick = { openPdfLauncher.launch(arrayOf("application/pdf")) },
                     modifier = Modifier.align(Alignment.TopCenter).size(60.dp),
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
@@ -188,7 +194,7 @@ fun PdfOcaHome(
                     items(section.items, key = { section.title + it.title }) { tool ->
                         ToolCard(tool) {
                             when (tool.action) {
-                                HomeAction.OpenPdf -> onOpenPdf()
+                                HomeAction.OpenPdf -> openPdfLauncher.launch(arrayOf("application/pdf"))
                                 HomeAction.CreatePdf -> onMessage("创建 PDF 功能正在接入")
                                 HomeAction.Placeholder -> onMessage("${tool.title} 功能正在接入")
                             }
