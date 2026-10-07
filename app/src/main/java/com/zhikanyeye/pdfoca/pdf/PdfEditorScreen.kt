@@ -60,6 +60,7 @@ fun PdfEditorScreen(
     var showTools by remember { mutableStateOf(false) }
     var showPageTools by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
+    var showSplit by remember { mutableStateOf(false) }
 
     val edits = pageEdits?.snapshot().orEmpty()
 
@@ -338,7 +339,7 @@ fun PdfEditorScreen(
                             else -> message = action
                         }
                     },
-                    { showTools = false; showPageTools = true })
+                    { showTools = false; showPageTools = false; showSplit = true })
             }
 
             if (showPageTools) {
@@ -348,7 +349,22 @@ fun PdfEditorScreen(
                     { selectedPages.forEach { pageEdits?.rotateById(it) }; showPageTools = false },
                     { moveSelected(-1); showPageTools = false },
                     { moveSelected(1); showPageTools = false },
-                    { showPageTools = false; showTools = true })
+                    { showPageTools = false; showTools = false; showSplit = true })
+            }
+
+            if (showSplit) {
+                SplitPanel(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    selected = selectedPreset,
+                    customRect = customRect,
+                    onSelect = { selectedPreset = it },
+                    onCustomRectChange = { customRect = it },
+                    onApply = {
+                        showSplit = false
+                        message = if (selectedPreset == SplitPreset.NONE) "请选择一种分割方式" else "分割方案已应用到选中页面，保存时导出"
+                    },
+                    onDismiss = { showSplit = false }
+                )
             }
 
             if (busy) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth())
@@ -416,6 +432,58 @@ private fun PageToolsPanel(
             }
         }
     }
+}
+
+@Composable
+private fun SplitPanel(
+    modifier: Modifier,
+    selected: SplitPreset,
+    customRect: CropRect,
+    onSelect: (SplitPreset) -> Unit,
+    onCustomRectChange: (CropRect) -> Unit,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, tonalElevation = 10.dp, shadowElevation = 10.dp) {
+        Column(Modifier.padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("页面分割", style = MaterialTheme.typography.titleMedium)
+                    Text("拖动预览中的分割区域，保存时生成独立页面", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭") }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SplitChoice("左右 2 分", SplitPreset.HORIZONTAL_2, selected, onSelect)
+                SplitChoice("上下 2 分", SplitPreset.VERTICAL_2, selected, onSelect)
+                SplitChoice("2 × 2", SplitPreset.GRID_2X2, selected, onSelect)
+                SplitChoice("3 × 3", SplitPreset.GRID_3X3, selected, onSelect)
+                SplitChoice("自由裁切", SplitPreset.CUSTOM, selected, onSelect)
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when (selected) {
+                        SplitPreset.HORIZONTAL_2 -> "当前页面将左右拆成 2 个 PDF 页面"
+                        SplitPreset.VERTICAL_2 -> "当前页面将上下拆成 2 个 PDF 页面"
+                        SplitPreset.GRID_2X2 -> "当前页面将拆成 4 个 PDF 页面"
+                        SplitPreset.GRID_3X3 -> "当前页面将拆成 9 个 PDF 页面"
+                        SplitPreset.CUSTOM -> "拖动四角选择需要保留的区域"
+                        SplitPreset.NONE -> "请选择分割方式"
+                    },
+                    Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium
+                )
+                FilledTonalButton(onClick = onApply, enabled = selected != SplitPreset.NONE) { Text("应用") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SplitChoice(label: String, preset: SplitPreset, selected: SplitPreset, onSelect: (SplitPreset) -> Unit) {
+    FilterChip(selected = selected == preset, onClick = { onSelect(preset) }, label = { Text(label) })
 }
 
 @Composable
