@@ -50,6 +50,8 @@ fun PdfEditorScreen(
     var selectedPreset by remember { mutableStateOf(SplitPreset.NONE) }
     var customRects by remember { mutableStateOf(listOf(CropRect(0f, 0f, 1f, 1f))) }
     var selectedCropIndex by remember { mutableIntStateOf(0) }
+    var splitRatioX by remember { mutableFloatStateOf(.5f) }
+    var splitRatioY by remember { mutableFloatStateOf(.5f) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var contentEdits by remember { mutableStateOf<List<PdfContentEdit>>(emptyList()) }
@@ -123,7 +125,7 @@ fun PdfEditorScreen(
                 busy = true
                 runCatching {
                     val regions = if (selectedPreset == SplitPreset.CUSTOM) customRects
-                    else engine.presetRegions(selectedPreset)
+                    else previewRegions(selectedPreset, splitRatioX, splitRatioY)
                     val requests = if (selectedPreset == SplitPreset.NONE) emptyList()
                     else selectedPages.mapNotNull { id ->
                         edits.firstOrNull { it.id == id }?.let { PageSplitRequest(it.sourceIndex, regions) }
@@ -257,8 +259,10 @@ fun PdfEditorScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     pageBitmap?.let { bitmap ->
-                        SplitPreview(bitmap, selectedPreset, customRects, selectedCropIndex,
+                        SplitPreview(bitmap, selectedPreset, customRects, selectedCropIndex, splitRatioX, splitRatioY,
                             onSelectCrop = { selectedCropIndex = it },
+                            onRatioXChange = { splitRatioX = it },
+                            onRatioYChange = { splitRatioY = it },
                             onCustomRectChange = { index, rect -> customRects = customRects.toMutableList().also { it[index] = rect } })
                     }
                         ?: if (busy) CircularProgressIndicator() else Text("打开一个 PDF 开始阅读")
@@ -602,7 +606,11 @@ private fun SplitPreview(
     preset: SplitPreset,
     customRects: List<CropRect>,
     selectedCropIndex: Int,
+    ratioX: Float,
+    ratioY: Float,
     onSelectCrop: (Int) -> Unit,
+    onRatioXChange: (Float) -> Unit,
+    onRatioYChange: (Float) -> Unit,
     onCustomRectChange: (Int, CropRect) -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
@@ -614,7 +622,7 @@ private fun SplitPreview(
             val regions = when (preset) {
                 SplitPreset.CUSTOM -> customRects
                 SplitPreset.NONE -> emptyList()
-                else -> previewRegions(preset)
+                else -> previewRegions(preset, ratioX, ratioY)
             }
             regions.forEachIndexed { index, region ->
                 Box(Modifier.offset(width * region.left, height * region.top)
@@ -626,6 +634,27 @@ private fun SplitPreview(
                 CropEditor(width = width, height = height,
                     rect = customRects[selectedCropIndex.coerceIn(customRects.indices)],
                     onChange = { onCustomRectChange(selectedCropIndex, it) })
+            } else if (preset == SplitPreset.HORIZONTAL_2 || preset == SplitPreset.GRID_2X2) {
+                Box(
+                    Modifier.offset(width * ratioX - 10.dp, 0.dp).width(20.dp).fillMaxHeight()
+                        .pointerInput(ratioX, width) {
+                            detectDragGestures { change, drag ->
+                                change.consume()
+                                onRatioXChange((ratioX + drag.x / width.toPx()).coerceIn(.1f, .9f))
+                            }
+                        }
+                )
+            }
+            if (preset == SplitPreset.VERTICAL_2 || preset == SplitPreset.GRID_2X2) {
+                Box(
+                    Modifier.offset(0.dp, height * ratioY - 10.dp).fillMaxWidth().height(20.dp)
+                        .pointerInput(ratioY, height) {
+                            detectDragGestures { change, drag ->
+                                change.consume()
+                                onRatioYChange((ratioY + drag.y / height.toPx()).coerceIn(.1f, .9f))
+                            }
+                        }
+                )
             }
         }
     }
@@ -727,18 +756,18 @@ private fun CropHandle(
     )
 }
 
-private fun previewRegions(preset: SplitPreset): List<CropRect> = when (preset) {
+private fun previewRegions(preset: SplitPreset, ratioX: Float = .5f, ratioY: Float = .5f): List<CropRect> = when (preset) {
     SplitPreset.HORIZONTAL_2 -> listOf(
-        CropRect(0f, 0f, .5f, 1f),
-        CropRect(.5f, 0f, 1f, 1f)
+        CropRect(0f, 0f, ratioX, 1f),
+        CropRect(ratioX, 0f, 1f, 1f)
     )
     SplitPreset.VERTICAL_2 -> listOf(
-        CropRect(0f, 0f, 1f, .5f),
-        CropRect(0f, .5f, 1f, 1f)
+        CropRect(0f, 0f, 1f, ratioY),
+        CropRect(0f, ratioY, 1f, 1f)
     )
     SplitPreset.GRID_2X2 -> buildList {
         for (r in 0..1) for (c in 0..1) {
-            add(CropRect(c / 2f, r / 2f, (c + 1) / 2f, (r + 1) / 2f))
+            add(CropRect(if (c == 0) 0f else ratioX, if (r == 0) 0f else ratioY, if (c == 0) ratioX else 1f, if (r == 0) ratioY else 1f))
         }
     }
     SplitPreset.GRID_3X3 -> buildList {
