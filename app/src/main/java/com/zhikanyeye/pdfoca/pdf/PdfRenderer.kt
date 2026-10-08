@@ -36,71 +36,49 @@ class PdfRendererService(private val context: Context) : AutoCloseable {
     )
 
     private class UriSeekableInputStream(
-        private val resolver: ContentResolver,
-        private val uri: Uri,
+        resolver: ContentResolver,
+        uri: Uri,
+        cacheDir: java.io.File,
     ) : SeekableInputStream {
-        private var stream: InputStream = open()
-        private var position: Long = 0L
+        private val stagedFile: java.io.File = java.io.File.createTempFile("pdfoca-", ".pdf", cacheDir)
+        private val file: java.io.RandomAccessFile
 
-        private fun open(): InputStream =
-            resolver.openInputStream(uri) ?: throw IOException("无法打开 PDF")
+        init {
+            try {
+                resolver.openInputStream(uri).use { source ->
+                    requireNotNull(source) { "无法打开 PDF" }
+                    stagedFile.outputStream().buffered(64 * 1024).use { target ->
+                        source.copyTo(target, 64 * 1024)
+                    }
+                }
+                file = java.io.RandomAccessFile(stagedFile, "r")
+            } catch (t: Throwable) {
+                stagedFile.delete()
+                throw t
+            }
+        }
 
         override fun seek(offset: Long, whence: Int): Long {
             val target = when (whence) {
                 0 -> offset
-                1 -> position + offset
-                2 -> {
-                    // Some content providers do not expose a seekable file
-                    // descriptor or a reliable size. If MuPDF requests an
-                    // end-relative seek, drain the stream in large chunks;
-                    // single-byte reads make large PDFs painfully slow.
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 16)
-                    while (true) {
-                        val count = stream.read(buffer)
-                        if (count < 0) break
-                        if (count == 0) continue
-                        position += count
-                    }
-                    position + offset
-                }
+                1 -> file.filePointer + offset
+                2 -> file.length() + offset
                 else -> throw IOException("无效的 PDF seek 模式")
             }
-
-            require(target >= 0) { "无效的 PDF 文件位置" }
-
-            if (target < position) {
-                stream.close()
-                stream = open()
-                position = 0L
+            if (target < 0L || target > file.length()) {
+                throw IOException("无效的 PDF 文件位置: $target")
             }
-
-            var remaining = target - position
-            while (remaining > 0) {
-                val skipped = stream.skip(remaining)
-                if (skipped > 0) {
-                    remaining -= skipped
-                    position += skipped
-                } else {
-                    if (stream.read() < 0) {
-                        throw IOException("PDF 文件读取提前结束")
-                    }
-                    remaining--
-                    position++
-                }
-            }
-            return position
+            file.seek(target)
+            return file.filePointer
         }
 
-        override fun position(): Long = position
+        override fun position(): Long = file.filePointer
 
-        override fun read(buffer: ByteArray): Int {
-            val count = stream.read(buffer)
-            if (count > 0) position += count
-            return count
-        }
+        override fun read(buffer: ByteArray): Int = file.read(buffer)
 
         fun closeStream() {
-            runCatching { stream.close() }
+            runCatching { file.close() }
+            runCatching { stagedFile.delete() }
         }
     }
 
@@ -227,7 +205,7 @@ class PdfRendererService(private val context: Context) : AutoCloseable {
         pages.clear()
         runCatching { document?.destroy() }
 
-        val newInput = UriSeekableInputStream(context.contentResolver, uri)
+        val newInput = UriSeekableInputStream(context.contentResolver, uri, context.cacheDir)
         try {
             val newDocument = Document.openDocument(newInput, "application/pdf")
             input = newInput
