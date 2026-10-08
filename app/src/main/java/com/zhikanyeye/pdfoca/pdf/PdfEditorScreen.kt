@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
@@ -278,7 +279,10 @@ fun PdfEditorScreen(
                     Text("当前页面还没有添加文字或图片。先使用“添加文字”或“插入图片”，再回来调整位置和大小。")
                 } else {
                     val item = selectedEntry.value
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text("对象 ${selectedContentIndex + 1} / ${pageContent.size}")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(enabled = selectedContentIndex > 0, onClick = { selectedContentIndex-- }) { Text("上一个") }
