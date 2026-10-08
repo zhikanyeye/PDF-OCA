@@ -293,9 +293,9 @@ fun PdfEditorScreen(
                     }
                 } else if (pdfUri != null && edits.isNotEmpty()) {
                     val readerState = rememberLazyListState(initialFirstVisibleItemIndex = selectedPage.coerceIn(edits.indices))
-                    LaunchedEffect(selectedPage, showPageTools) {
-                        if (!showPageTools) readerState.scrollToItem(selectedPage.coerceIn(edits.indices))
-                    }
+                    // Keep the list position driven by the user's scroll. Scrolling
+                    // updates selectedPage below; scrolling back in response to every
+                    // selectedPage update creates a feedback loop and visible jank.
                     LaunchedEffect(readerState, showPageTools, edits) {
                         if (!showPageTools) {
                             snapshotFlow { readerState.firstVisibleItemIndex }
