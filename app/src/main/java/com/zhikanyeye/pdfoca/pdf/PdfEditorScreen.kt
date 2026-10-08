@@ -58,6 +58,7 @@ fun PdfEditorScreen(
     var selectedCropIndex by remember { mutableIntStateOf(0) }
     var splitRatioX by remember { mutableFloatStateOf(.5f) }
     var splitRatioY by remember { mutableFloatStateOf(.5f) }
+    var lineDrawStart by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var contentEdits by remember { mutableStateOf<List<PdfContentEdit>>(emptyList()) }
@@ -288,6 +289,19 @@ fun PdfEditorScreen(
                                 onSelectCrop = { selectedCropIndex = it },
                                 onRatioXChange = { splitRatioX = it },
                                 onRatioYChange = { splitRatioY = it },
+                                onLineDraw = { start, end ->
+                                    val dx = abs(end.x - start.x)
+                                    val dy = abs(end.y - start.y)
+                                    if (dx >= dy) {
+                                        splitRatioY = ((start.y + end.y) / 2f).coerceIn(.1f, .9f)
+                                        selectedPreset = SplitPreset.VERTICAL_2
+                                        message = "已按直线位置分割为上下两部分"
+                                    } else {
+                                        splitRatioX = ((start.x + end.x) / 2f).coerceIn(.1f, .9f)
+                                        selectedPreset = SplitPreset.HORIZONTAL_2
+                                        message = "已按直线位置分割为左右两部分"
+                                    }
+                                },
                                 onCustomRectChange = { index, rect -> customRects = customRects.toMutableList().also { it[index] = rect } })
                         } ?: if (busy) CircularProgressIndicator() else Text(renderError ?: "正在准备分割预览")
                     }
@@ -506,6 +520,7 @@ private fun SplitPanel(
                 SplitChoice("2 × 2", SplitPreset.GRID_2X2, selected, onSelect)
                 SplitChoice("3 × 3", SplitPreset.GRID_3X3, selected, onSelect)
                 SplitChoice("自由裁切", SplitPreset.CUSTOM, selected, onSelect)
+                SplitChoice("画线分割", SplitPreset.LINE, selected, onSelect)
             }
             if (selected == SplitPreset.CUSTOM) {
                 Spacer(Modifier.height(8.dp))
@@ -529,9 +544,10 @@ private fun SplitPanel(
                     SplitPreset.GRID_2X2 -> "当前页面将拆成 4 个 PDF 页面"
                     SplitPreset.GRID_3X3 -> "当前页面将拆成 9 个 PDF 页面"
                     SplitPreset.CUSTOM -> if (customRects.isEmpty()) "请添加至少一个裁切区域" else "已设置 ${customRects.size} 个区域，保存时逐个生成页面"
+                    SplitPreset.LINE -> "在页面上从一侧向另一侧拖动画线，自动吸附为横线或竖线分割"
                     SplitPreset.NONE -> "请选择分割方式"
                 }, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                FilledTonalButton(onClick = onApply, enabled = selected != SplitPreset.NONE && (selected != SplitPreset.CUSTOM || customRects.isNotEmpty())) { Text("应用") }
+                FilledTonalButton(onClick = onApply, enabled = selected != SplitPreset.NONE && selected != SplitPreset.LINE && (selected != SplitPreset.CUSTOM || customRects.isNotEmpty())) { Text("应用") }
             }
         }
     }
@@ -663,7 +679,8 @@ private fun SplitPreview(
     onSelectCrop: (Int) -> Unit,
     onRatioXChange: (Float) -> Unit,
     onRatioYChange: (Float) -> Unit,
-    onCustomRectChange: (Int, CropRect) -> Unit
+    onCustomRectChange: (Int, CropRect) -> Unit,
+    onLineDraw: (androidx.compose.ui.geometry.Offset, androidx.compose.ui.geometry.Offset) -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
         val ratio = bitmap.width.toFloat() / bitmap.height
@@ -673,7 +690,7 @@ private fun SplitPreview(
             Image(bitmap.asImageBitmap(), "PDF 页面预览", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             val regions = when (preset) {
                 SplitPreset.CUSTOM -> customRects
-                SplitPreset.NONE -> emptyList()
+                SplitPreset.NONE, SplitPreset.LINE -> emptyList()
                 else -> previewRegions(preset, ratioX, ratioY)
             }
             regions.forEachIndexed { index, region ->
@@ -682,7 +699,27 @@ private fun SplitPreview(
                     .border(if (preset == SplitPreset.CUSTOM && index == selectedCropIndex) 2.5.dp else 1.5.dp,
                         if (preset == SplitPreset.CUSTOM && index == selectedCropIndex) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary))
             }
-            if (preset == SplitPreset.CUSTOM && customRects.isNotEmpty()) {
+            if (preset == SplitPreset.LINE) {
+                var dragStart by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+                var dragEnd by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+                Box(Modifier.fillMaxSize().pointerInput(preset, width, height) {
+                    detectDragGestures(
+                        onDragStart = { dragStart = it; dragEnd = it },
+                        onDragEnd = {
+                            val start = dragStart
+                            val end = dragEnd
+                            if (start != null && end != null) {
+                                onLineDraw(
+                                    androidx.compose.ui.geometry.Offset((start.x / size.width).coerceIn(0f, 1f), (start.y / size.height).coerceIn(0f, 1f)),
+                                    androidx.compose.ui.geometry.Offset((end.x / size.width).coerceIn(0f, 1f), (end.y / size.height).coerceIn(0f, 1f))
+                                )
+                            }
+                            dragStart = null; dragEnd = null
+                        },
+                        onDragCancel = { dragStart = null; dragEnd = null }
+                    ) { change, drag -> change.consume(); dragEnd = (dragEnd ?: change.position) + drag }
+                })
+            } else if (preset == SplitPreset.CUSTOM && customRects.isNotEmpty()) {
                 CropEditor(width = width, height = height,
                     rect = customRects[selectedCropIndex.coerceIn(customRects.indices)],
                     onChange = { onCustomRectChange(selectedCropIndex, it) })
