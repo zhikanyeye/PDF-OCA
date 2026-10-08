@@ -643,8 +643,19 @@ private fun SplitPreview(
                                 change.consume()
                                 onRatioXChange((ratioX + drag.x / width.toPx()).coerceIn(.1f, .9f))
                             }
-                        }
-                )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(Modifier.width(3.dp).fillMaxHeight(.94f)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.tertiary.copy(alpha = .9f)))
+                    Box(Modifier.size(width = 18.dp, height = 34.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.tertiary),
+                        contentAlignment = Alignment.Center) {
+                        Text("⋮", color = MaterialTheme.colorScheme.onTertiary)
+                    }
+                }
             }
             if (preset == SplitPreset.VERTICAL_2 || preset == SplitPreset.GRID_2X2) {
                 Box(
@@ -654,8 +665,19 @@ private fun SplitPreview(
                                 change.consume()
                                 onRatioYChange((ratioY + drag.y / height.toPx()).coerceIn(.1f, .9f))
                             }
-                        }
-                )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(Modifier.fillMaxWidth(.94f).height(3.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.tertiary.copy(alpha = .9f)))
+                    Box(Modifier.size(width = 34.dp, height = 18.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.tertiary),
+                        contentAlignment = Alignment.Center) {
+                        Text("⋯", color = MaterialTheme.colorScheme.onTertiary)
+                    }
+                }
             }
         }
     }
