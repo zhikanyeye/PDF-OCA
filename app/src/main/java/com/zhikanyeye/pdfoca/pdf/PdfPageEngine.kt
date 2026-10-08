@@ -23,7 +23,7 @@ class PdfPageEngine(private val context: Context) {
         SplitPreset.VERTICAL_2 -> listOf(CropRect(0f,0f,1f,.5f), CropRect(0f,.5f,1f,1f))
         SplitPreset.GRID_2X2 -> grid(2,2)
         SplitPreset.GRID_3X3 -> grid(3,3)
-        SplitPreset.CUSTOM -> emptyList()
+        SplitPreset.CUSTOM, SplitPreset.LINE -> emptyList()
     }
 
     private fun grid(c: Int, r: Int) = buildList {
