@@ -50,9 +50,17 @@ class PdfRendererService(private val context: Context) : AutoCloseable {
                 0 -> offset
                 1 -> position + offset
                 2 -> {
-                    // Content providers do not always expose a length, so walk
-                    // to EOF when MuPDF asks for an end-relative seek.
-                    while (stream.read() >= 0) position++
+                    // Some content providers do not expose a seekable file
+                    // descriptor or a reliable size. If MuPDF requests an
+                    // end-relative seek, drain the stream in large chunks;
+                    // single-byte reads make large PDFs painfully slow.
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 16)
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        if (count == 0) continue
+                        position += count
+                    }
                     position + offset
                 }
                 else -> throw IOException("无效的 PDF seek 模式")
