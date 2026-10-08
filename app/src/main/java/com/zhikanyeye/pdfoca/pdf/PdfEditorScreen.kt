@@ -48,7 +48,8 @@ fun PdfEditorScreen(
     var selectedPages by remember { mutableStateOf(setOf<Long>()) }
     var pageEdits by remember { mutableStateOf<PdfPageEdits?>(null) }
     var selectedPreset by remember { mutableStateOf(SplitPreset.NONE) }
-    var customRect by remember { mutableStateOf(CropRect(0f, 0f, 1f, 1f)) }
+    var customRects by remember { mutableStateOf(listOf(CropRect(0f, 0f, 1f, 1f))) }
+    var selectedCropIndex by remember { mutableIntStateOf(0) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var contentEdits by remember { mutableStateOf<List<PdfContentEdit>>(emptyList()) }
@@ -121,7 +122,7 @@ fun PdfEditorScreen(
             scope.launch {
                 busy = true
                 runCatching {
-                    val regions = if (selectedPreset == SplitPreset.CUSTOM) listOf(customRect)
+                    val regions = if (selectedPreset == SplitPreset.CUSTOM) customRects
                     else engine.presetRegions(selectedPreset)
                     val requests = if (selectedPreset == SplitPreset.NONE) emptyList()
                     else selectedPages.mapNotNull { id ->
@@ -255,7 +256,11 @@ fun PdfEditorScreen(
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .24f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    pageBitmap?.let { SplitPreview(it, selectedPreset, customRect) { customRect = it } }
+                    pageBitmap?.let { bitmap ->
+                        SplitPreview(bitmap, selectedPreset, customRects, selectedCropIndex,
+                            onSelectCrop = { selectedCropIndex = it },
+                            onCustomRectChange = { index, rect -> customRects = customRects.toMutableList().also { it[index] = rect } })
+                    }
                         ?: if (busy) CircularProgressIndicator() else Text("打开一个 PDF 开始阅读")
 
                     if (pageCount > 0) {
@@ -356,9 +361,12 @@ fun PdfEditorScreen(
                 SplitPanel(
                     modifier = Modifier.align(Alignment.BottomCenter),
                     selected = selectedPreset,
-                    customRect = customRect,
+                    customRects = customRects,
+                    selectedCropIndex = selectedCropIndex,
                     onSelect = { selectedPreset = it },
-                    onCustomRectChange = { customRect = it },
+                    onSelectCrop = { selectedCropIndex = it },
+                    onAddCrop = { customRects = customRects + CropRect(.15f, .15f, .85f, .85f); selectedCropIndex = customRects.lastIndex; selectedPreset = SplitPreset.CUSTOM },
+                    onRemoveCrop = { if (customRects.size > 1) { customRects = customRects.filterIndexed { index, _ -> index != selectedCropIndex }; selectedCropIndex = selectedCropIndex.coerceAtMost(customRects.lastIndex) } },
                     onApply = {
                         showSplit = false
                         message = if (selectedPreset == SplitPreset.NONE) "请选择一种分割方式" else "分割方案已应用到选中页面，保存时导出"
@@ -438,9 +446,12 @@ private fun PageToolsPanel(
 private fun SplitPanel(
     modifier: Modifier,
     selected: SplitPreset,
-    customRect: CropRect,
+    customRects: List<CropRect>,
+    selectedCropIndex: Int,
     onSelect: (SplitPreset) -> Unit,
-    onCustomRectChange: (CropRect) -> Unit,
+    onSelectCrop: (Int) -> Unit,
+    onAddCrop: () -> Unit,
+    onRemoveCrop: () -> Unit,
     onApply: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -449,7 +460,7 @@ private fun SplitPanel(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("页面分割", style = MaterialTheme.typography.titleMedium)
-                    Text("拖动预览中的分割区域，保存时生成独立页面", style = MaterialTheme.typography.bodySmall,
+                    Text("一页可框选多个区域，导出为多个独立页面", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭") }
@@ -462,25 +473,35 @@ private fun SplitPanel(
                 SplitChoice("3 × 3", SplitPreset.GRID_3X3, selected, onSelect)
                 SplitChoice("自由裁切", SplitPreset.CUSTOM, selected, onSelect)
             }
+            if (selected == SplitPreset.CUSTOM) {
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("区域", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.width(8.dp))
+                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        customRects.forEachIndexed { index, _ ->
+                            FilterChip(selected = selectedCropIndex == index, onClick = { onSelectCrop(index) }, label = { Text("区域 ${index + 1}") })
+                        }
+                    }
+                    IconButton(onClick = onAddCrop) { Icon(Icons.Default.Add, "添加区域") }
+                    IconButton(onClick = onRemoveCrop, enabled = customRects.size > 1) { Icon(Icons.Default.Remove, "删除区域") }
+                }
+            }
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    when (selected) {
-                        SplitPreset.HORIZONTAL_2 -> "当前页面将左右拆成 2 个 PDF 页面"
-                        SplitPreset.VERTICAL_2 -> "当前页面将上下拆成 2 个 PDF 页面"
-                        SplitPreset.GRID_2X2 -> "当前页面将拆成 4 个 PDF 页面"
-                        SplitPreset.GRID_3X3 -> "当前页面将拆成 9 个 PDF 页面"
-                        SplitPreset.CUSTOM -> "拖动四角选择需要保留的区域"
-                        SplitPreset.NONE -> "请选择分割方式"
-                    },
-                    Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium
-                )
+                Text(when (selected) {
+                    SplitPreset.HORIZONTAL_2 -> "当前页面将左右拆成 2 个 PDF 页面"
+                    SplitPreset.VERTICAL_2 -> "当前页面将上下拆成 2 个 PDF 页面"
+                    SplitPreset.GRID_2X2 -> "当前页面将拆成 4 个 PDF 页面"
+                    SplitPreset.GRID_3X3 -> "当前页面将拆成 9 个 PDF 页面"
+                    SplitPreset.CUSTOM -> "已设置 ${customRects.size} 个区域，保存时逐个生成页面"
+                    SplitPreset.NONE -> "请选择分割方式"
+                }, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 FilledTonalButton(onClick = onApply, enabled = selected != SplitPreset.NONE) { Text("应用") }
             }
         }
     }
 }
-
 @Composable
 private fun SplitChoice(label: String, preset: SplitPreset, selected: SplitPreset, onSelect: (SplitPreset) -> Unit) {
     FilterChip(selected = selected == preset, onClick = { onSelect(preset) }, label = { Text(label) })
@@ -579,49 +600,36 @@ private fun PageThumbnail(
 private fun SplitPreview(
     bitmap: Bitmap,
     preset: SplitPreset,
-    customRect: CropRect,
-    onCustomRectChange: (CropRect) -> Unit
+    customRects: List<CropRect>,
+    selectedCropIndex: Int,
+    onSelectCrop: (Int) -> Unit,
+    onCustomRectChange: (Int, CropRect) -> Unit
 ) {
-    BoxWithConstraints(
-        Modifier.fillMaxSize().padding(12.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
         val ratio = bitmap.width.toFloat() / bitmap.height
         val width = minOf(maxWidth.value, maxHeight.value * ratio).dp
         val height = width / ratio
-
         Box(Modifier.size(width, height)) {
             Image(bitmap.asImageBitmap(), "PDF 页面预览", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-
             val regions = when (preset) {
-                SplitPreset.CUSTOM -> listOf(customRect)
+                SplitPreset.CUSTOM -> customRects
                 SplitPreset.NONE -> emptyList()
                 else -> previewRegions(preset)
             }
-
-            regions.forEach { region ->
-                Box(
-                    Modifier.offset(width * region.left, height * region.top)
-                        .size(
-                            width * (region.right - region.left),
-                            height * (region.bottom - region.top)
-                        )
-                        .border(1.5.dp, MaterialTheme.colorScheme.primary)
-                )
+            regions.forEachIndexed { index, region ->
+                Box(Modifier.offset(width * region.left, height * region.top)
+                    .size(width * (region.right - region.left), height * (region.bottom - region.top))
+                    .border(if (preset == SplitPreset.CUSTOM && index == selectedCropIndex) 2.5.dp else 1.5.dp,
+                        if (preset == SplitPreset.CUSTOM && index == selectedCropIndex) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary))
             }
-
-            if (preset == SplitPreset.CUSTOM) {
-                CropEditor(
-                    width = width,
-                    height = height,
-                    rect = customRect,
-                    onChange = onCustomRectChange
-                )
+            if (preset == SplitPreset.CUSTOM && customRects.isNotEmpty()) {
+                CropEditor(width = width, height = height,
+                    rect = customRects[selectedCropIndex.coerceIn(customRects.indices)],
+                    onChange = { onCustomRectChange(selectedCropIndex, it) })
             }
         }
     }
 }
-
 @Composable
 private fun CropEditor(
     width: androidx.compose.ui.unit.Dp,
