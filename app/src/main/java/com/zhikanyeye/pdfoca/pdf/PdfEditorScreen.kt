@@ -819,7 +819,7 @@ private fun CropHandle(
             .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.primary)
             .pointerInput(x, y) {
-                detectDragGesturesAfterLongPress { change, drag ->
+                detectDragGestures { change, drag ->
                     change.consume()
                     onDrag(
                         drag.x / width.toPx(),
