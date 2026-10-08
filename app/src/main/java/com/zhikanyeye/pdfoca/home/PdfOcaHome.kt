@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 private data class ToolItem(
     val title: String,
     val icon: ImageVector,
-    val action: HomeAction = HomeAction.Placeholder
+    val action: HomeAction = HomeAction.OpenPdf
 )
 
 private enum class HomeAction { OpenPdf }
