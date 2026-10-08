@@ -4,6 +4,7 @@ package com.zhikanyeye.pdfoca.pdf
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -43,6 +44,7 @@ fun PdfEditorScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pdfUri by remember { mutableStateOf<Uri?>(null) }
+    var documentName by remember { mutableStateOf<String?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
     var selectedPage by remember { mutableIntStateOf(0) }
     var selectedPageId by remember { mutableLongStateOf(0L) }
@@ -71,6 +73,16 @@ fun PdfEditorScreen(
 
     fun loadPdf(uri: Uri) {
         pdfUri = uri
+        documentName = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+                    } else null
+                }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() && !it.startsWith("document:") }
+            ?: "PDF 文档"
         pageBitmap = null
         renderError = null
         selectedPage = 0
@@ -246,7 +258,7 @@ fun PdfEditorScreen(
                 },
                 title = {
                     Column {
-                        Text(pdfUri?.lastPathSegment ?: "PDF 阅读器", maxLines = 1, style = MaterialTheme.typography.titleMedium)
+                        Text(documentName ?: "PDF 阅读器", maxLines = 1, style = MaterialTheme.typography.titleMedium)
                         if (pageCount > 0) {
                             Text("第 ${selectedPage + 1} 页 · 共 $pageCount 页", style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
