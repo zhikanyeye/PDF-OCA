@@ -426,13 +426,10 @@ private fun ToolPanel(
         Column(Modifier.padding(16.dp)) {
             PanelHeader("编辑工具", onDismiss)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ToolAction("编辑文字", Icons.Default.Edit) { onAction("text") }
+                ToolAction("添加文字", Icons.Default.Edit) { onAction("text") }
                 ToolAction("插入图片", Icons.Default.Image) { onAction("image") }
                 ToolAction("高亮", Icons.Default.Highlight) { onAction("highlight") }
-                ToolAction("OCR", Icons.Default.TextFields) { onAction("OCR 功能正在接入") }
-                ToolAction("转换", Icons.Default.Transform) { onAction("PDF 转换功能正在接入") }
                 ToolAction("水印", Icons.Default.WaterDrop) { onAction("watermark") }
-                ToolAction("保护", Icons.Default.Lock) { onAction("加密/解密功能正在接入") }
                 ToolAction("保存", Icons.Default.Save) { onSave() }
                 ToolAction("分割", Icons.Default.ContentCut) { onOpenSplit() }
             }
@@ -739,7 +736,7 @@ private fun CropEditor(
                 )
                 .border(2.dp, MaterialTheme.colorScheme.primary)
                 .pointerInput(rect, width, height) {
-                    detectDragGesturesAfterLongPress { change, drag ->
+                    detectDragGestures { change, drag ->
                         change.consume()
                         val dx = drag.x / width.toPx()
                         val dy = drag.y / height.toPx()
