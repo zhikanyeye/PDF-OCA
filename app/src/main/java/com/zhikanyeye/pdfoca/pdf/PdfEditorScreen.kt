@@ -61,6 +61,7 @@ fun PdfEditorScreen(
     var textInput by remember { mutableStateOf("") }
     var watermarkInput by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
+    var renderError by remember { mutableStateOf<String?>(null) }
     var showTools by remember { mutableStateOf(false) }
     var showPageTools by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
@@ -70,6 +71,8 @@ fun PdfEditorScreen(
 
     fun loadPdf(uri: Uri) {
         pdfUri = uri
+        pageBitmap = null
+        renderError = null
         selectedPage = 0
         selectedPageId = 0L
         selectedPages = emptySet()
@@ -82,7 +85,10 @@ fun PdfEditorScreen(
                     selectedPages = if (it > 0) setOf(0L) else emptySet()
                     message = "已打开 PDF，共 $it 页"
                 }
-                .onFailure { message = it.message ?: "打开 PDF 失败" }
+                .onFailure {
+                    renderError = "打开 PDF 失败：${it.message ?: it.javaClass.simpleName}"
+                    message = renderError
+                }
             busy = false
         }
     }
@@ -155,9 +161,14 @@ fun PdfEditorScreen(
             return@LaunchedEffect
         }
         busy = true
+        renderError = null
         runCatching { renderer.renderPage(uri, edit.sourceIndex, 1800, edit.rotation) }
-            .onSuccess { pageBitmap = it }
-            .onFailure { message = it.message ?: "页面渲染失败" }
+            .onSuccess { pageBitmap = it; renderError = null }
+            .onFailure {
+                pageBitmap = null
+                renderError = "第 ${selectedPage + 1} 页渲染失败：${it.message ?: it.javaClass.simpleName}"
+                message = renderError
+            }
         busy = false
     }
 
@@ -265,8 +276,23 @@ fun PdfEditorScreen(
                             onRatioXChange = { splitRatioX = it },
                             onRatioYChange = { splitRatioY = it },
                             onCustomRectChange = { index, rect -> customRects = customRects.toMutableList().also { it[index] = rect } })
+                    } ?: when {
+                        busy -> CircularProgressIndicator()
+                        renderError != null -> Column(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(Icons.Default.ErrorOutline, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(40.dp))
+                            Text(renderError!!, color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium)
+                            Text("请重新打开文件；如果仍然失败，需要根据这里显示的错误继续定位。",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        else -> Text("打开一个 PDF 开始阅读")
                     }
-                        ?: if (busy) CircularProgressIndicator() else Text("打开一个 PDF 开始阅读")
 
                     if (pageCount > 0) {
                         Surface(
