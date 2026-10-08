@@ -71,7 +71,8 @@ fun PdfEditorScreen(
     var renderError by remember { mutableStateOf<String?>(null) }
     var showTools by remember { mutableStateOf(false) }
     var showPageTools by remember { mutableStateOf(false) }
-    var showMore by remember { mutableStateOf(false) }
+    var showQualityDialog by remember { mutableStateOf(false) }
+    var renderQuality by remember { mutableFloatStateOf(1800f) }
     var showSplit by remember { mutableStateOf(false) }
 
     val edits = pageEdits?.snapshot().orEmpty()
@@ -235,6 +236,34 @@ fun PdfEditorScreen(
         )
     }
 
+    if (showQualityDialog) {
+        AlertDialog(
+            onDismissRequest = { showQualityDialog = false },
+            title = { Text("阅读清晰度") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${renderQuality.toInt()} px · 数值越高越清晰，也会占用更多内存")
+                    Slider(
+                        value = renderQuality,
+                        onValueChange = { renderQuality = it },
+                        valueRange = 900f..3000f,
+                        steps = 6
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("流畅")
+                        Text("高清")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showQualityDialog = false }) { Text("完成") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renderQuality = 1800f }) { Text("恢复默认") }
+            }
+        )
+    }
+
     if (showWatermarkDialog) {
         AlertDialog(
             onDismissRequest = { showWatermarkDialog = false },
@@ -272,11 +301,8 @@ fun PdfEditorScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = { showQualityDialog = true }) { Text("清晰度") }
                     TextButton(onClick = { showTools = !showTools }) { Text("编辑") }
-                    
-                    
-                    
-                    IconButton(onClick = { showMore = !showMore }) { Icon(Icons.Default.MoreVert, "更多") }
                 }
             )
         }
@@ -331,7 +357,7 @@ fun PdfEditorScreen(
                     ) {
                         items(edits.size, key = { edits[it].id }) { index ->
                             val edit = edits[index]
-                            ReaderPage(renderer, pdfUri!!, edit.sourceIndex, edit.rotation, index + 1)
+                            ReaderPage(renderer, pdfUri!!, edit.sourceIndex, edit.rotation, index + 1, renderQuality.toInt())
                         }
                     }
                 } else {
@@ -389,10 +415,6 @@ fun PdfEditorScreen(
                             "text" -> { textInput = ""; showTextDialog = true }
                             "image" -> imagePicker.launch(arrayOf("image/*"))
                             "watermark" -> { watermarkInput = ""; showWatermarkDialog = true }
-                            "highlight" -> edits.getOrNull(selectedPage)?.let { page ->
-                                contentEdits = contentEdits + PdfAnnotationEdit(page.sourceIndex, CropRect(.12f, .28f, .88f, .36f))
-                                message = "已添加高亮区域"
-                            }
                             else -> message = action
                         }
                     },
@@ -456,7 +478,6 @@ private fun ToolPanel(
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ToolAction("添加文字", Icons.Default.Edit) { onAction("text") }
                 ToolAction("插入图片", Icons.Default.Image) { onAction("image") }
-                ToolAction("高亮", Icons.Default.Highlight) { onAction("highlight") }
                 ToolAction("水印", Icons.Default.WaterDrop) { onAction("watermark") }
                 ToolAction("保存", Icons.Default.Save) { onSave() }
                 ToolAction("分割", Icons.Default.ContentCut) { onOpenSplit() }
@@ -585,13 +606,13 @@ private fun MoreAction(label: String, icon: androidx.compose.ui.graphics.vector.
 }
 
 @Composable
-private fun ReaderPage(renderer: PdfRendererService, uri: Uri, pageIndex: Int, rotation: Int, displayNumber: Int) {
-    var bitmap by remember(uri, pageIndex, rotation) { mutableStateOf<Bitmap?>(null) }
-    var error by remember(uri, pageIndex, rotation) { mutableStateOf<String?>(null) }
-    LaunchedEffect(uri, pageIndex, rotation) {
+private fun ReaderPage(renderer: PdfRendererService, uri: Uri, pageIndex: Int, rotation: Int, displayNumber: Int, quality: Int) {
+    var bitmap by remember(uri, pageIndex, rotation, quality) { mutableStateOf<Bitmap?>(null) }
+    var error by remember(uri, pageIndex, rotation, quality) { mutableStateOf<String?>(null) }
+    LaunchedEffect(uri, pageIndex, rotation, quality) {
         bitmap = null
         error = null
-        runCatching { renderer.renderPage(uri, pageIndex, 1100, rotation) }
+        runCatching { renderer.renderPage(uri, pageIndex, quality, rotation) }
             .onSuccess { bitmap = it }
             .onFailure { error = it.message ?: "页面渲染失败" }
     }
