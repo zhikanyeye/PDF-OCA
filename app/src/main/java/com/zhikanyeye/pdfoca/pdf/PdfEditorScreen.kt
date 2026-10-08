@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -58,7 +60,6 @@ fun PdfEditorScreen(
     var selectedCropIndex by remember { mutableIntStateOf(0) }
     var splitRatioX by remember { mutableFloatStateOf(.5f) }
     var splitRatioY by remember { mutableFloatStateOf(.5f) }
-    var lineDrawStart by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var contentEdits by remember { mutableStateOf<List<PdfContentEdit>>(emptyList()) }
@@ -702,23 +703,46 @@ private fun SplitPreview(
             if (preset == SplitPreset.LINE) {
                 var dragStart by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
                 var dragEnd by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
-                Box(Modifier.fillMaxSize().pointerInput(preset, width, height) {
-                    detectDragGestures(
-                        onDragStart = { dragStart = it; dragEnd = it },
-                        onDragEnd = {
-                            val start = dragStart
-                            val end = dragEnd
-                            if (start != null && end != null) {
-                                onLineDraw(
-                                    androidx.compose.ui.geometry.Offset((start.x / size.width).coerceIn(0f, 1f), (start.y / size.height).coerceIn(0f, 1f)),
-                                    androidx.compose.ui.geometry.Offset((end.x / size.width).coerceIn(0f, 1f), (end.y / size.height).coerceIn(0f, 1f))
-                                )
-                            }
-                            dragStart = null; dragEnd = null
-                        },
-                        onDragCancel = { dragStart = null; dragEnd = null }
-                    ) { change, drag -> change.consume(); dragEnd = (dragEnd ?: change.position) + drag }
-                })
+                Box(Modifier.fillMaxSize()) {
+                    Box(Modifier.fillMaxSize().pointerInput(preset, width, height) {
+                        detectDragGestures(
+                            onDragStart = { dragStart = it; dragEnd = it },
+                            onDragEnd = {
+                                val start = dragStart
+                                val end = dragEnd
+                                if (start != null && end != null) {
+                                    onLineDraw(
+                                        androidx.compose.ui.geometry.Offset((start.x / size.width).coerceIn(0f, 1f), (start.y / size.height).coerceIn(0f, 1f)),
+                                        androidx.compose.ui.geometry.Offset((end.x / size.width).coerceIn(0f, 1f), (end.y / size.height).coerceIn(0f, 1f))
+                                    )
+                                }
+                                dragStart = null
+                                dragEnd = null
+                            },
+                            onDragCancel = { dragStart = null; dragEnd = null }
+                        ) { change, _ ->
+                            change.consume()
+                            dragEnd = change.position
+                        }
+                    })
+                    Canvas(Modifier.fillMaxSize()) {
+                        val start = dragStart
+                        val end = dragEnd
+                        if (start != null && end != null) {
+                            drawLine(
+                                color = Color(0xFFFF5722),
+                                start = start,
+                                end = end,
+                                strokeWidth = 5.dp.toPx(),
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round
+                            )
+                            drawCircle(Color.White, radius = 7.dp.toPx(), center = start)
+                            drawCircle(Color(0xFFFF5722), radius = 5.dp.toPx(), center = start)
+                            drawCircle(Color.White, radius = 7.dp.toPx(), center = end)
+                            drawCircle(Color(0xFFFF5722), radius = 5.dp.toPx(), center = end)
+                        }
+                    }
+                }
             } else if (preset == SplitPreset.CUSTOM && customRects.isNotEmpty()) {
                 CropEditor(width = width, height = height,
                     rect = customRects[selectedCropIndex.coerceIn(customRects.indices)],
