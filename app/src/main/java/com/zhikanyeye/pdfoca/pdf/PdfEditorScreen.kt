@@ -286,18 +286,17 @@ fun PdfEditorScreen(
                         }
                         when (item) {
                             is PdfTextEdit -> {
-                                Text("文字：${item.text}", maxLines = 2)
+                                OutlinedTextField(
+                                    value = item.text,
+                                    onValueChange = { value -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(text = value) } },
+                                    label = { Text("文字内容") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                                 Text("字号：${item.fontSize.toInt()}")
                                 Slider(
                                     value = item.fontSize,
                                     onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(fontSize = v) } },
                                     valueRange = 8f..48f
-                                )
-                                Text("宽度：${(item.width * 100).toInt()}%")
-                                Slider(
-                                    value = item.width,
-                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(width = v) } },
-                                    valueRange = .1f.. .9f
                                 )
                                 Text("水平位置：${(item.x * 100).toInt()}%")
                                 Slider(
