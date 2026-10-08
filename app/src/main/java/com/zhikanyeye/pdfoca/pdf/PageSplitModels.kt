@@ -1,6 +1,6 @@
 package com.zhikanyeye.pdfoca.pdf
 
-enum class SplitPreset { NONE, HORIZONTAL_2, VERTICAL_2, GRID_2X2, GRID_3X3, CUSTOM }
+enum class SplitPreset { NONE, HORIZONTAL_2, VERTICAL_2, GRID_2X2, GRID_3X3, CUSTOM, LINE }
 
 data class CropRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
     init {
