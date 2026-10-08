@@ -366,7 +366,7 @@ fun PdfEditorScreen(
                     onSelect = { selectedPreset = it },
                     onSelectCrop = { selectedCropIndex = it },
                     onAddCrop = { customRects = customRects + CropRect(.15f, .15f, .85f, .85f); selectedCropIndex = customRects.lastIndex; selectedPreset = SplitPreset.CUSTOM },
-                    onRemoveCrop = { if (customRects.size > 1) { customRects = customRects.filterIndexed { index, _ -> index != selectedCropIndex }; selectedCropIndex = selectedCropIndex.coerceAtMost(customRects.lastIndex) } },
+                    onRemoveCrop = { if (customRects.isNotEmpty()) { customRects = customRects.filterIndexed { index, _ -> index != selectedCropIndex }; selectedCropIndex = if (customRects.isEmpty()) 0 else selectedCropIndex.coerceAtMost(customRects.lastIndex) } },
                     onApply = {
                         showSplit = false
                         message = if (selectedPreset == SplitPreset.NONE) "请选择一种分割方式" else "分割方案已应用到选中页面，保存时导出"
@@ -484,7 +484,7 @@ private fun SplitPanel(
                         }
                     }
                     IconButton(onClick = onAddCrop) { Icon(Icons.Default.Add, "添加区域") }
-                    IconButton(onClick = onRemoveCrop, enabled = customRects.size > 1) { Icon(Icons.Default.Remove, "删除区域") }
+                    IconButton(onClick = onRemoveCrop, enabled = customRects.isNotEmpty()) { Icon(Icons.Default.Remove, "删除区域") }
                 }
             }
             Spacer(Modifier.height(10.dp))
@@ -494,10 +494,10 @@ private fun SplitPanel(
                     SplitPreset.VERTICAL_2 -> "当前页面将上下拆成 2 个 PDF 页面"
                     SplitPreset.GRID_2X2 -> "当前页面将拆成 4 个 PDF 页面"
                     SplitPreset.GRID_3X3 -> "当前页面将拆成 9 个 PDF 页面"
-                    SplitPreset.CUSTOM -> "已设置 ${customRects.size} 个区域，保存时逐个生成页面"
+                    SplitPreset.CUSTOM -> if (customRects.isEmpty()) "请添加至少一个裁切区域" else "已设置 ${customRects.size} 个区域，保存时逐个生成页面"
                     SplitPreset.NONE -> "请选择分割方式"
                 }, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                FilledTonalButton(onClick = onApply, enabled = selected != SplitPreset.NONE) { Text("应用") }
+                FilledTonalButton(onClick = onApply, enabled = selected != SplitPreset.NONE && (selected != SplitPreset.CUSTOM || customRects.isNotEmpty())) { Text("应用") }
             }
         }
     }
@@ -645,6 +645,18 @@ private fun CropEditor(
                     height * (rect.bottom - rect.top)
                 )
                 .border(2.dp, MaterialTheme.colorScheme.primary)
+                .pointerInput(rect, width, height) {
+                    detectDragGesturesAfterLongPress { change, drag ->
+                        change.consume()
+                        val dx = drag.x / width.toPx()
+                        val dy = drag.y / height.toPx()
+                        val w = rect.right - rect.left
+                        val h = rect.bottom - rect.top
+                        val left = (rect.left + dx).coerceIn(0f, 1f - w)
+                        val top = (rect.top + dy).coerceIn(0f, 1f - h)
+                        onChange(CropRect(left, top, left + w, top + h))
+                    }
+                }
         )
 
         CropHandle(width, height, rect.left, rect.top) { dx, dy ->
