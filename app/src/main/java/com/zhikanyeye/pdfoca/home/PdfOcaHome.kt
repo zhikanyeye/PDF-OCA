@@ -29,7 +29,7 @@ private data class ToolItem(
     val action: HomeAction = HomeAction.Placeholder
 )
 
-private enum class HomeAction { OpenPdf, CreatePdf, Placeholder }
+private enum class HomeAction { OpenPdf }
 
 private data class ToolSection(
     val title: String,
@@ -48,51 +48,9 @@ fun PdfOcaHome(
 
     val sections = remember {
         listOf(
-            ToolSection("编辑", listOf(
-                ToolItem("编辑 PDF", Icons.Default.Edit, HomeAction.OpenPdf),
-                ToolItem("填写并签署", Icons.Default.Draw),
-                ToolItem("组织页面", Icons.Default.Workspaces),
-                ToolItem("压缩 PDF", Icons.Default.Tune),
-                ToolItem("插入页面", Icons.Default.NoteAdd)
-            )),
-            ToolSection("创建", listOf(
-                ToolItem("扫描文件", Icons.Default.FolderOpen),
-                ToolItem("扫描身份证", Icons.Default.Description),
-                ToolItem("扫描护照", Icons.Default.Description),
-                ToolItem("二维码", Icons.Default.QrCode2),
-                ToolItem("创建 PDF", Icons.Default.PictureAsPdf, HomeAction.CreatePdf),
-                ToolItem("合并 PDF", Icons.Default.Workspaces)
-            )),
-            ToolSection("识别", listOf(
-                ToolItem("扫描转文字", Icons.Default.TextFields),
-                ToolItem("图片转文字", Icons.Default.Image),
-                ToolItem("PDF 转文本", Icons.Default.Description),
-                ToolItem("使其可搜索", Icons.Default.Search)
-            )),
-            ToolSection("转换", listOf(
-                ToolItem("图像转 PDF", Icons.Default.PictureAsPdf),
-                ToolItem("PDF 到图像", Icons.Default.Image),
-                ToolItem("Word 转 PDF", Icons.Default.Description),
-                ToolItem("Excel 转 PDF", Icons.Default.Description),
-                ToolItem("EPUB 转 PDF", Icons.Default.Description),
-                ToolItem("PPT 转 PDF", Icons.Default.Description),
-                ToolItem("PDF 转 Word", Icons.Default.Description),
-                ToolItem("PDF 转 Excel", Icons.Default.Description),
-                ToolItem("PDF 转 EPUB", Icons.Default.Description),
-                ToolItem("PDF 转 PPTX", Icons.Default.Description)
-            )),
-            ToolSection("阅读和查看", listOf(
-                ToolItem("阅读", Icons.Default.MenuBook, HomeAction.OpenPdf),
-                ToolItem("批注", Icons.Default.Draw),
-                ToolItem("打印", Icons.Default.Print),
-                ToolItem("保护", Icons.Default.Security),
-                ToolItem("分享", Icons.Default.Share)
-            )),
-            ToolSection("其他", listOf(
-                ToolItem("分割页面", Icons.Default.ContentCut),
-                ToolItem("水印", Icons.Default.WaterDrop),
-                ToolItem("加密 / 解密", Icons.Default.Lock),
-                ToolItem("AI 助手", Icons.Default.AutoAwesome)
+            ToolSection("PDF 文件", listOf(
+                ToolItem("打开并编辑 PDF", Icons.Default.Edit, HomeAction.OpenPdf),
+                ToolItem("阅读 PDF", Icons.Default.MenuBook, HomeAction.OpenPdf)
             ))
         )
     }
@@ -102,14 +60,7 @@ fun PdfOcaHome(
         topBar = {
             TopAppBar(
                 title = { Text("工具", style = MaterialTheme.typography.headlineSmall) },
-                actions = {
-                    IconButton(onClick = { onMessage("搜索工具功能即将开放") }) {
-                        Icon(Icons.Default.Search, "搜索")
-                    }
-                    IconButton(onClick = { onMessage("更多工具设置即将开放") }) {
-                        Icon(Icons.Default.PushPin, "固定")
-                    }
-                },
+                actions = {},
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -205,8 +156,7 @@ fun PdfOcaHome(
                         ToolCard(tool) {
                             when (tool.action) {
                                 HomeAction.OpenPdf -> openPdfLauncher.launch(arrayOf("application/pdf"))
-                                HomeAction.CreatePdf -> onMessage("创建 PDF 功能正在接入")
-                                HomeAction.Placeholder -> onMessage("${tool.title} 功能正在接入")
+                                
                             }
                         }
                     }
