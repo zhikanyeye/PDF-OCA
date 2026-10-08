@@ -15,8 +15,10 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -166,7 +168,8 @@ fun PdfEditorScreen(
         }
     }
 
-    LaunchedEffect(pdfUri, selectedPage, selectedPageId, edits) {
+    LaunchedEffect(pdfUri, selectedPage, selectedPageId, edits, showSplit) {
+        if (!showSplit) return@LaunchedEffect
         val uri = pdfUri ?: return@LaunchedEffect
         val edit = edits.getOrNull(selectedPage) ?: run {
             pageBitmap = null
@@ -174,7 +177,7 @@ fun PdfEditorScreen(
         }
         busy = true
         renderError = null
-        runCatching { renderer.renderPage(uri, edit.sourceIndex, 1800, edit.rotation) }
+        runCatching { renderer.renderPage(uri, edit.sourceIndex, 1200, edit.rotation) }
             .onSuccess { pageBitmap = it; renderError = null }
             .onFailure {
                 pageBitmap = null
@@ -267,9 +270,9 @@ fun PdfEditorScreen(
                 },
                 actions = {
                     TextButton(onClick = { showTools = !showTools }) { Text("编辑") }
-                    TextButton(onClick = { message = "AI 助手入口已预留" }) { Text("AI") }
-                    IconButton(onClick = { message = "搜索功能正在接入" }) { Icon(Icons.Default.Search, "搜索") }
-                    IconButton(onClick = { message = "书签功能正在接入" }) { Icon(Icons.Default.BookmarkBorder, "书签") }
+                    
+                    
+                    
                     IconButton(onClick = { showMore = !showMore }) { Icon(Icons.Default.MoreVert, "更多") }
                 }
             )
@@ -277,78 +280,56 @@ fun PdfEditorScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier.fillMaxWidth().weight(1f)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .24f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    pageBitmap?.let { bitmap ->
-                        SplitPreview(bitmap, selectedPreset, customRects, selectedCropIndex, splitRatioX, splitRatioY,
-                            onSelectCrop = { selectedCropIndex = it },
-                            onRatioXChange = { splitRatioX = it },
-                            onRatioYChange = { splitRatioY = it },
-                            onCustomRectChange = { index, rect -> customRects = customRects.toMutableList().also { it[index] = rect } })
-                    } ?: when {
-                        busy -> CircularProgressIndicator()
-                        renderError != null -> Column(
-                            modifier = Modifier.fillMaxWidth().padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(Icons.Default.ErrorOutline, contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(40.dp))
-                            Text(renderError!!, color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodyMedium)
-                            Text("请重新打开文件；如果仍然失败，需要根据这里显示的错误继续定位。",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall)
-                        }
-                        else -> Text("打开一个 PDF 开始阅读")
+                if (showSplit) {
+                    Box(Modifier.fillMaxWidth().weight(1f).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .24f)), contentAlignment = Alignment.Center) {
+                        pageBitmap?.let { bitmap ->
+                            SplitPreview(bitmap, selectedPreset, customRects, selectedCropIndex, splitRatioX, splitRatioY,
+                                onSelectCrop = { selectedCropIndex = it },
+                                onRatioXChange = { splitRatioX = it },
+                                onRatioYChange = { splitRatioY = it },
+                                onCustomRectChange = { index, rect -> customRects = customRects.toMutableList().also { it[index] = rect } })
+                        } ?: if (busy) CircularProgressIndicator() else Text(renderError ?: "正在准备分割预览")
                     }
-
-                    if (pageCount > 0) {
-                        Surface(
-                            Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
-                            shape = MaterialTheme.shapes.extraLarge,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f)
-                        ) {
-                            Text("${selectedPage + 1} / $pageCount", color = MaterialTheme.colorScheme.surface,
-                                style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+                } else if (pdfUri != null && edits.isNotEmpty()) {
+                    val readerState = rememberLazyListState(initialFirstVisibleItemIndex = selectedPage.coerceIn(edits.indices))
+                    LaunchedEffect(selectedPage, showPageTools) {
+                        if (!showPageTools) readerState.scrollToItem(selectedPage.coerceIn(edits.indices))
+                    }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .24f)),
+                        state = readerState,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(edits.size, key = { edits[it].id }) { index ->
+                            val edit = edits[index]
+                            ReaderPage(renderer, pdfUri!!, edit.sourceIndex, edit.rotation, index + 1)
                         }
                     }
-
-                    if (showMore) {
-                        Surface(Modifier.align(Alignment.TopEnd).padding(10.dp).width(230.dp),
-                            shape = MaterialTheme.shapes.large, tonalElevation = 5.dp, shadowElevation = 5.dp) {
-                            Column(Modifier.padding(vertical = 6.dp)) {
-                                MoreAction("保存副本", Icons.Default.ContentCopy) { showMore = false; savePdf.launch("PDF-OCA-edited.pdf") }
-                                MoreAction("分享", Icons.Default.Share) { showMore = false; message = "分享功能正在接入" }
-                                MoreAction("打印", Icons.Default.Print) { showMore = false; message = "打印功能正在接入" }
-                                MoreAction("打开其他 PDF", Icons.Default.FolderOpen) { showMore = false; openPdf.launch(arrayOf("application/pdf")) }
-                            }
+                } else {
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        when {
+                            busy -> CircularProgressIndicator()
+                            renderError != null -> Text(renderError!!, modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.error)
+                            else -> Text("打开一个 PDF 开始阅读")
                         }
                     }
                 }
-
-                Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+                if (showPageTools) Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
                     LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(edits, key = { it.id }) { edit ->
                             val index = edits.indexOfFirst { it.id == edit.id }
-                            PageThumbnail(
-                                renderer, pdfUri ?: return@items, edit.sourceIndex, edit.rotation, index,
+                            PageThumbnail(renderer, pdfUri ?: return@items, edit.sourceIndex, edit.rotation, index,
                                 index == selectedPage, edit.id in selectedPages,
                                 { selectPage(index, edit.id) },
                                 { delta ->
                                     val n = pageEdits?.moveById(edit.id, delta) ?: -1
                                     if (n >= 0) { selectedPage = n; selectedPageId = edit.id }
-                                }
-                            )
+                                })
                         }
                     }
                 }
-
                 Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
                     Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically) {
@@ -576,6 +557,28 @@ private fun MoreAction(label: String, icon: androidx.compose.ui.graphics.vector.
     }
 }
 
+@Composable
+private fun ReaderPage(renderer: PdfRendererService, uri: Uri, pageIndex: Int, rotation: Int, displayNumber: Int) {
+    var bitmap by remember(uri, pageIndex, rotation) { mutableStateOf<Bitmap?>(null) }
+    var error by remember(uri, pageIndex, rotation) { mutableStateOf<String?>(null) }
+    LaunchedEffect(uri, pageIndex, rotation) {
+        bitmap = null
+        error = null
+        runCatching { renderer.renderPage(uri, pageIndex, 1100, rotation) }
+            .onSuccess { bitmap = it }
+            .onFailure { error = it.message ?: "页面渲染失败" }
+    }
+    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp, shape = MaterialTheme.shapes.small) {
+        Column(Modifier.fillMaxWidth().padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            when {
+                bitmap != null -> Image(bitmap!!.asImageBitmap(), contentDescription = "第 ${displayNumber} 页", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                error != null -> Text("第 ${displayNumber} 页加载失败：$error", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.error)
+                else -> Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            }
+            Text("$displayNumber", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 @Composable
 private fun PageThumbnail(
     renderer: PdfRendererService,
