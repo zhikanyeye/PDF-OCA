@@ -65,6 +65,8 @@ fun PdfEditorScreen(
     var contentEdits by remember { mutableStateOf<List<PdfContentEdit>>(emptyList()) }
     var showTextDialog by remember { mutableStateOf(false) }
     var showWatermarkDialog by remember { mutableStateOf(false) }
+    var showContentDialog by remember { mutableStateOf(false) }
+    var selectedContentIndex by remember { mutableIntStateOf(0) }
     var textInput by remember { mutableStateOf("") }
     var watermarkInput by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
@@ -264,6 +266,97 @@ fun PdfEditorScreen(
         )
     }
 
+    if (showContentDialog) {
+        val currentPageIndex = edits.getOrNull(selectedPage)?.sourceIndex
+        val pageContent = contentEdits.withIndex().filter { it.value.pageSourceIndex == currentPageIndex }
+        val selectedEntry = pageContent.getOrNull(selectedContentIndex)
+        AlertDialog(
+            onDismissRequest = { showContentDialog = false },
+            title = { Text("编辑文字与图片") },
+            text = {
+                if (selectedEntry == null) {
+                    Text("当前页面还没有添加文字或图片。先使用“添加文字”或“插入图片”，再回来调整位置和大小。")
+                } else {
+                    val item = selectedEntry.value
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("对象 ${selectedContentIndex + 1} / ${pageContent.size}")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(enabled = selectedContentIndex > 0, onClick = { selectedContentIndex-- }) { Text("上一个") }
+                            TextButton(enabled = selectedContentIndex < pageContent.lastIndex, onClick = { selectedContentIndex++ }) { Text("下一个") }
+                        }
+                        when (item) {
+                            is PdfTextEdit -> {
+                                Text("文字：${item.text}", maxLines = 2)
+                                Text("字号：${item.fontSize.toInt()}")
+                                Slider(
+                                    value = item.fontSize,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(fontSize = v) } },
+                                    valueRange = 8f..48f
+                                )
+                                Text("宽度：${(item.width * 100).toInt()}%")
+                                Slider(
+                                    value = item.width,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(width = v) } },
+                                    valueRange = .1f.. .9f
+                                )
+                                Text("水平位置：${(item.x * 100).toInt()}%")
+                                Slider(
+                                    value = item.x,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(x = v.coerceIn(0f, 1f - item.width)) } },
+                                    valueRange = 0f..(1f - item.width).coerceAtLeast(0f)
+                                )
+                                Text("垂直位置：${(item.y * 100).toInt()}%")
+                                Slider(
+                                    value = item.y,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(y = v.coerceIn(0f, .98f)) } },
+                                    valueRange = 0f.. .98f
+                                )
+                            }
+                            is PdfImageEdit -> {
+                                Text("图片大小：${(item.width * 100).toInt()}% × ${(item.height * 100).toInt()}%")
+                                Slider(
+                                    value = item.width,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(width = v, x = item.x.coerceIn(0f, 1f-v)) } },
+                                    valueRange = .1f.. .8f
+                                )
+                                Slider(
+                                    value = item.height,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(height = v, y = item.y.coerceIn(0f, 1f-v)) } },
+                                    valueRange = .1f.. .8f
+                                )
+                                Text("水平位置：${(item.x * 100).toInt()}%")
+                                Slider(
+                                    value = item.x,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(x = v.coerceIn(0f, 1f-item.width)) } },
+                                    valueRange = 0f..(1f-item.width).coerceAtLeast(0f)
+                                )
+                                Text("垂直位置：${(item.y * 100).toInt()}%")
+                                Slider(
+                                    value = item.y,
+                                    onValueChange = { v -> contentEdits = contentEdits.toMutableList().also { it[selectedEntry.index] = item.copy(y = v.coerceIn(0f, 1f-item.height)) } },
+                                    valueRange = 0f..(1f-item.height).coerceAtLeast(0f)
+                                )
+                            }
+                            else -> Text("此对象暂不支持直接调整。")
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showContentDialog = false }) { Text("完成") } },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        if (selectedEntry != null) {
+                            contentEdits = contentEdits.filterIndexed { index, _ -> index != selectedEntry.index }
+                            selectedContentIndex = (selectedContentIndex - 1).coerceAtLeast(0)
+                        }
+                    }, enabled = selectedEntry != null) { Text("删除对象") }
+                    TextButton(onClick = { showContentDialog = false }) { Text("关闭") }
+                }
+            }
+        )
+    }
+
     if (showWatermarkDialog) {
         AlertDialog(
             onDismissRequest = { showWatermarkDialog = false },
@@ -414,6 +507,12 @@ fun PdfEditorScreen(
                         when (action) {
                             "text" -> { textInput = ""; showTextDialog = true }
                             "image" -> imagePicker.launch(arrayOf("image/*"))
+                            "adjust" -> {
+                                selectedContentIndex = 0
+                                if (contentEdits.none { it.pageSourceIndex == edits.getOrNull(selectedPage)?.sourceIndex }) {
+                                    message = "当前页面还没有添加可编辑的文字或图片"
+                                } else showContentDialog = true
+                            }
                             "watermark" -> { watermarkInput = ""; showWatermarkDialog = true }
                             else -> message = action
                         }
@@ -478,6 +577,7 @@ private fun ToolPanel(
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ToolAction("添加文字", Icons.Default.Edit) { onAction("text") }
                 ToolAction("插入图片", Icons.Default.Image) { onAction("image") }
+                ToolAction("调整内容", Icons.Default.Tune) { onAction("adjust") }
                 ToolAction("水印", Icons.Default.WaterDrop) { onAction("watermark") }
                 ToolAction("保存", Icons.Default.Save) { onSave() }
                 ToolAction("分割", Icons.Default.ContentCut) { onOpenSplit() }
