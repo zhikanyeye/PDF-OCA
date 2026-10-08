@@ -33,6 +33,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -294,6 +295,18 @@ fun PdfEditorScreen(
                     val readerState = rememberLazyListState(initialFirstVisibleItemIndex = selectedPage.coerceIn(edits.indices))
                     LaunchedEffect(selectedPage, showPageTools) {
                         if (!showPageTools) readerState.scrollToItem(selectedPage.coerceIn(edits.indices))
+                    }
+                    LaunchedEffect(readerState, showPageTools, edits) {
+                        if (!showPageTools) {
+                            snapshotFlow { readerState.firstVisibleItemIndex }
+                                .distinctUntilChanged()
+                                .collect { visibleIndex ->
+                                    if (visibleIndex in edits.indices) {
+                                        selectedPage = visibleIndex
+                                        selectedPageId = edits[visibleIndex].id
+                                    }
+                                }
+                        }
                     }
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth().weight(1f).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .24f)),
